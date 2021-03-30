@@ -169,6 +169,38 @@ def main():
         batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
+    if args.dataset == 'minikinetics':
+        train_loader = torch.utils.data.DataLoader(
+            TSNDataSet(args.root_path + '/train/', args.train_list, num_segments=args.num_segments,
+                       new_length=data_length,
+                       modality=args.modality,
+                       image_tmpl=prefix,
+                       transform=torchvision.transforms.Compose([
+                           train_augmentation,
+                           Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
+                           ToTorchFormatTensor(div=(args.arch not in ['BNInception', 'InceptionV3'])),
+                           normalize,
+                       ]), dense_sample=args.dense_sample),
+            batch_size=args.batch_size, shuffle=True,
+            num_workers=args.workers, pin_memory=True,
+            drop_last=True)  # prevent something not % n_GPU
+
+        val_loader = torch.utils.data.DataLoader(
+            TSNDataSet(args.root_path + '/val/', args.val_list, num_segments=args.num_segments,
+                       new_length=data_length,
+                       modality=args.modality,
+                       image_tmpl=prefix,
+                       random_shift=False,
+                       transform=torchvision.transforms.Compose([
+                           GroupScale(int(scale_size)),
+                           GroupCenterCrop(crop_size),
+                           Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
+                           ToTorchFormatTensor(div=(args.arch not in ['BNInception', 'InceptionV3'])),
+                           normalize,
+                       ]), dense_sample=args.dense_sample),
+            batch_size=args.batch_size, shuffle=False,
+            num_workers=args.workers, pin_memory=True)
+
     # define loss function (criterion) and optimizer
     if args.loss_type == 'nll':
         criterion = torch.nn.CrossEntropyLoss().cuda()

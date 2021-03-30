@@ -5,7 +5,7 @@
 
 import os
 
-ROOT_DATASET = '/ssd/video/'  # '/data/jilin/'
+ROOT_DATASET = '/data1/'  # '/data/jilin/'
 
 
 def return_ucf101(modality):
@@ -92,10 +92,21 @@ def return_jester(modality):
 def return_kinetics(modality):
     filename_categories = 400
     if modality == 'RGB':
-        root_data = ROOT_DATASET + 'kinetics/images'
-        filename_imglist_train = 'kinetics/labels/train_videofolder.txt'
-        filename_imglist_val = 'kinetics/labels/val_videofolder.txt'
-        prefix = 'img_{:05d}.jpg'
+        root_data = ROOT_DATASET + 'kinetics_400/frames'
+        filename_imglist_train = 'kinetics_400/labels/train_videofolder.txt'
+        filename_imglist_val = 'kinetics_400/labels/val_videofolder.txt'
+        prefix = 'image_{:05d}.jpg'
+    else:
+        raise NotImplementedError('no such modality:' + modality)
+    return filename_categories, filename_imglist_train, filename_imglist_val, root_data, prefix
+
+def return_minikinetics(modality):
+    filename_categories = 200
+    if modality == 'RGB':
+        root_data = ROOT_DATASET + 'minikinetics/frames/images'
+        filename_imglist_train = 'minikinetics/labels/train_videofolder.txt'
+        filename_imglist_val = 'minikinetics/labels/val_videofolder.txt'
+        prefix = 'image_{:05d}.jpg'
     else:
         raise NotImplementedError('no such modality:' + modality)
     return filename_categories, filename_imglist_train, filename_imglist_val, root_data, prefix
@@ -104,7 +115,7 @@ def return_kinetics(modality):
 def return_dataset(dataset, modality):
     dict_single = {'jester': return_jester, 'something': return_something, 'somethingv2': return_somethingv2,
                    'ucf101': return_ucf101, 'hmdb51': return_hmdb51,
-                   'kinetics': return_kinetics }
+                   'kinetics': return_kinetics, 'minikinetics': return_minikinetics }
     if dataset in dict_single:
         file_categories, file_imglist_train, file_imglist_val, root_data, prefix = dict_single[dataset](modality)
     else:
