@@ -62,7 +62,7 @@ class TSNDataSet(data.Dataset):
             try:
                 return [Image.open(os.path.join(self.root_path, directory, self.image_tmpl.format(idx))).convert('RGB')]
             except Exception:
-                print('error loading image:', os.path.join(self.root_path, directory, self.image_tmpl.format(idx)))
+                # print('error loading image:', os.path.join(self.root_path, directory, self.image_tmpl.format(idx)))
                 return [Image.open(os.path.join(self.root_path, directory, self.image_tmpl.format(1))).convert('RGB')]
         elif self.modality == 'Flow':
             if self.image_tmpl == 'flow_{}_{:05d}.jpg':  # ucf
@@ -177,7 +177,7 @@ class TSNDataSet(data.Dataset):
             full_path = os.path.join(self.root_path, record.path, file_name)
 
         while not os.path.exists(full_path):
-            print('################## Not Found:', os.path.join(self.root_path, record.path, file_name))
+            # print('################## Not Found:', os.path.join(self.root_path, record.path, file_name))
             index = np.random.randint(len(self.video_list))
             record = self.video_list[index]
             if self.image_tmpl == 'flow_{}_{:05d}.jpg':

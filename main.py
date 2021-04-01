@@ -10,6 +10,7 @@ import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim
 from torch.nn.utils import clip_grad_norm_
+import torch.nn.functional as F
 
 from ops.dataset import TSNDataSet
 from ops.models import TSN
@@ -236,6 +237,8 @@ def main():
 
             output_best = 'Best Prec@1: %.3f\n' % (best_prec1)
             print(output_best)
+            if is_best:
+                print('Current model is the best!')
             log_training.write(output_best + '\n')
             log_training.flush()
 
@@ -320,6 +323,9 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
     top1 = AverageMeter()
     top5 = AverageMeter()
 
+    all_results = []
+    all_targets = []
+
     # switch to evaluate mode
     model.eval()
 
@@ -343,6 +349,9 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
             batch_time.update(time.time() - end)
             end = time.time()
 
+            all_results.append(output)
+            all_targets.append(target)
+
             if i % args.print_freq == 0:
                 output = ('Test: [{0}/{1}]\t'
                           'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
@@ -356,8 +365,11 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
                     log.write(output + '\n')
                     log.flush()
 
-    output = ('Testing Results: Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} Loss {loss.avg:.5f}'
-              .format(top1=top1, top5=top5, loss=losses))
+    mAP, _ = cal_map(torch.cat(all_results, 0).cpu(), torch.cat(all_targets, 0).unsqueeze(1).cpu())
+    output = ('Testing Results: mAP {mAP:.3f} Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} '
+              'Loss {loss.avg:.5f} Time {time:.3f}'
+              .format(mAP=mAP, top1=top1, top5=top5,
+                      loss=losses, time=batch_time.avg * len(val_loader)))
     print(output)
     if log is not None:
         log.write(output + '\n')
@@ -404,6 +416,45 @@ def check_rootfolders():
         if not os.path.exists(folder):
             print('creating folder ' + folder)
             os.mkdir(folder)
+
+def get_multi_hot(test_y, classes, assumes_starts_zero=True):
+    bs = test_y.shape[0]
+    label_cnt = 0
+
+    # TODO ranking labels: (-1,-1,4,5,3,7)->(4,4,2,1,0,3)
+    if not assumes_starts_zero:
+        for label_val in torch.unique(test_y):
+            if label_val >= 0:
+                test_y[test_y == label_val] = label_cnt
+                label_cnt += 1
+
+    gt = torch.zeros(bs, classes + 1)  # TODO +1 for -1 in multi-label case
+    for i in range(test_y.shape[1]):
+        gt[torch.LongTensor(range(bs)), test_y[:, i]] = 1  # TODO see?
+
+    return gt[:, :classes]
+
+def cal_map(output, old_test_y):
+    batch_size = output.size(0)
+    num_classes = output.size(1)
+    ap = torch.zeros(num_classes)
+    test_y = old_test_y.clone()
+
+    gt = get_multi_hot(test_y, num_classes, False)
+
+    probs = F.softmax(output, dim=1)
+
+    rg = torch.range(1, batch_size).float()
+    for k in range(num_classes):
+        scores = probs[:, k]
+        targets = gt[:, k]
+        _, sortind = torch.sort(scores, 0, True)
+        truth = targets[sortind]
+        tp = truth.float().cumsum(0)
+        precision = tp.div(rg)
+
+        ap[k] = precision[truth.byte()].sum() / max(float(truth.sum()), 1)
+    return ap.mean() * 100, ap * 100
 
 
 if __name__ == '__main__':

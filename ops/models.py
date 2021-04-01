@@ -54,7 +54,9 @@ class TSN(nn.Module):
         consensus_module:   {}
         dropout_ratio:      {}
         img_feature_dim:    {}
-            """.format(base_model, self.modality, self.num_segments, self.new_length, consensus_type, self.dropout, self.img_feature_dim)))
+        pretrain:           {}
+            """.format(base_model, self.modality, self.num_segments, self.new_length, consensus_type, self.dropout,
+                       self.img_feature_dim, self.pretrain)))
 
         self._prepare_base_model(base_model)
 
