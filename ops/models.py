@@ -9,9 +9,31 @@ from ops.basic_ops import ConsensusModule
 from ops.transforms import *
 from torch.nn.init import normal_, constant_
 
+from ops.utils import DCTmatrix, DCTmatrix_rgb
+import torch.nn.functional as F
+
+def make_a_linear(input_dim, output_dim):
+    linear_model = nn.Linear(input_dim, output_dim)
+    normal_(linear_model.weight, 0, 0.001)
+    constant_(linear_model.bias, 0)
+    return linear_model
+
+def conv1x1(in_planes, out_planes):
+    return nn.Conv2d(in_planes, out_planes, kernel_size=1)
+
+def DCTmatrix_hat(C, length):
+    C_hat = torch.zeros(3 * length, 3 * length)
+    for i in range(3 * length):
+        if i < length:
+            C_hat[i, :length] = C[i, :]
+        elif i < 2 * length:
+            C_hat[i, length: 2 * length] = C[i - length, :]
+        else:
+            C_hat[i, 2 * length: 3 * length] = C[i - (2 * length), :]
+    return C_hat
 
 class TSN(nn.Module):
-    def __init__(self, num_class, num_segments, modality,
+    def __init__(self, num_class, num_segments, modality, freq_selection,
                  base_model='resnet101', new_length=None,
                  consensus_type='avg', before_softmax=True,
                  dropout=0.8, img_feature_dim=256,
@@ -21,6 +43,7 @@ class TSN(nn.Module):
         super(TSN, self).__init__()
         self.modality = modality
         self.num_segments = num_segments
+        self.freq_selection = freq_selection
         self.reshape = True
         self.before_softmax = before_softmax
         self.dropout = dropout
@@ -50,17 +73,26 @@ class TSN(nn.Module):
     TSN Configurations:
         input_modality:     {}
         num_segments:       {}
+        freq_selection:     {}
         new_length:         {}
         consensus_module:   {}
         dropout_ratio:      {}
         img_feature_dim:    {}
         pretrain:           {}
-            """.format(base_model, self.modality, self.num_segments, self.new_length, consensus_type, self.dropout,
+            """.format(base_model, self.modality, self.num_segments, self.freq_selection,
+                       self.new_length, consensus_type, self.dropout,
                        self.img_feature_dim, self.pretrain)))
 
         self._prepare_base_model(base_model)
 
         feature_dim = self._prepare_tsn(num_class)
+
+        if self.freq_selection:
+            self._prepare_policy_network(num_segments)
+            self.DCT = DCTmatrix(num_segments)
+            self.DCT_hat = DCTmatrix_rgb(self.DCT, num_segments)
+            self.DCT, self.DCT_hat = \
+                torch.from_numpy(self.DCT).type(torch.float32), torch.from_numpy(self.DCT_hat).type(torch.float32)
 
         if self.modality == 'Flow':
             print("Converting the ImageNet model to a flow init model")
@@ -171,6 +203,10 @@ class TSN(nn.Module):
         else:
             raise ValueError('Unknown base model: {}'.format(base_model))
 
+    def _prepare_policy_network(self, num_segments):
+        self.policy_linear = make_a_linear(2 * num_segments - 1, num_segments)
+        self.policy_1x1 = conv1x1(3, 2)
+
     def train(self, mode=True):
         """
         Override the default train() to freeze the BN parameters
@@ -263,8 +299,89 @@ class TSN(nn.Module):
         ]
 
     def forward(self, input, no_reshape=False):
+        if self.freq_selection:
+            batch_size = input.shape[0]
+            height = input.shape[2]
+            width = input.shape[3]
+            tau = 1
+
+            # TODO: RGBRGBRGB... -> RRR...GGG...BBB...
+            r_indices = (torch.arange(self.num_segments) * 3).cuda()
+            input_r = torch.index_select(input.reshape(batch_size, 3 * self.num_segments, -1), 1, r_indices)
+            input_g = torch.index_select(input.reshape(batch_size, 3 * self.num_segments, -1), 1, r_indices + 1)
+            input_b = torch.index_select(input.reshape(batch_size, 3 * self.num_segments, -1), 1, r_indices + 2)
+            input_reshape = torch.cat((input_r, input_g, input_b), dim=1)
+
+            # TODO: normal DCT
+            input_DCT = []
+            self.DCT_hat = self.DCT_hat.cuda()
+            for batch in range(batch_size):
+                input_DCT.append(torch.matmul(self.DCT_hat, input_reshape[batch, :, :]).unsqueeze(0))
+            input_DCT = torch.cat(input_DCT, 0)
+
+            # TODO: normalize
+
+
+            # TODO: policy network
+            mean_per_freq = torch.mean(input_DCT.reshape(3 * batch_size, self.num_segments, -1), dim=2).squeeze()
+
+            ### using diff between freqs
+            mean_and_diff_per_freq = torch.zeros(3 * batch_size, 2 * self.num_segments - 1).cuda()
+            for i in range(2 * self.num_segments - 1):
+                if i % 2 == 0:
+                    mean_and_diff_per_freq[:, i] = mean_per_freq[:, i // 2]
+                else:
+                    mean_and_diff_per_freq[:, i] = mean_per_freq[:, (i // 2) + 1] - mean_per_freq[:, i // 2]
+            feat_3channel = self.policy_linear(mean_and_diff_per_freq)
+
+            ### not using diff
+            # feat_3channel = mean_per_freq.reshape(batch_size, 3, self.num_segments).unsqueeze(-1)
+
+            feat_2channel = self.policy_1x1(feat_3channel.reshape(batch_size, 3, self.num_segments).unsqueeze(-1))
+            p_t = torch.log(F.softmax(feat_2channel.squeeze(), dim=1).clamp(min=1e-8))
+
+            # r_t = torch.cat(
+            #     [F.gumbel_softmax(p_t[b_i:b_i + 1], tau=tau, hard=True, dim=1) for b_i in range(p_t.shape[0])])
+            r_t = F.gumbel_softmax(p_t, tau, hard=True, dim=1)
+            mask = r_t[:, 0, :].clone()
+
+            # TODO: masking
+            # normalize
+            input_reshape_norm = input_reshape / 255
+            input_reshape_norm[:, : self.num_segments, :] = \
+                (input_reshape[:, : self.num_segments, :] - self.input_mean[0]) / self.input_std[0]
+            input_reshape_norm[:, self.num_segments: 2 * self.num_segments, :] = \
+                (input_reshape[:, self.num_segments: 2 * self.num_segments, :] - self.input_mean[1]) / self.input_std[1]
+            input_reshape_norm[:, 2 * self.num_segments: 3 * self.num_segments, :] = \
+                (input_reshape[:, 2 * self.num_segments: 3 * self.num_segments, :] - self.input_mean[2]) / self.input_std[2]
+
+            mask_exp = mask.repeat(1, 3)
+            input_masked = torch.zeros_like(input_reshape_norm)
+            for i in range(batch_size):
+                masked_DCT_hat = mask_exp[i, :].unsqueeze(-1) * self.DCT_hat
+                if self.modality == 'Freq':  ### learning in frequency domain
+                    input_masked[i] = torch.matmul(masked_DCT_hat, input_reshape_norm[i])
+                elif self.modality == 'RGB':  ### learning in time domain
+                    input_masked[i] = torch.matmul(torch.transpose(masked_DCT_hat, 0, 1),
+                                                    torch.matmul(masked_DCT_hat, input_reshape_norm[i]))
+                else:
+                    NotImplementedError("Inappropriate modality!")
+
+            # TODO: RRR...GGG...BBB... -> RGBRGBRGB...
+            input_new = torch.zeros_like(input_masked).cuda()
+            for i in range(3 * self.num_segments):
+                if i < self.num_segments:
+                    input_new[:, 3 * i, :] = input_masked[:, i, :]
+                elif i < 2 * self.num_segments:
+                    input_new[:, 3 * (i - self.num_segments) + 1, :] = input_masked[:, i, :]
+                else:
+                    input_new[:, 3 * (i - 2 * self.num_segments) + 2, :] = input_masked[:, i, :]
+            input = input_new.reshape(batch_size, 3 * self.num_segments, height, width)
+        else:
+            r_t = None
+
         if not no_reshape:
-            sample_len = (3 if self.modality == "RGB" else 2) * self.new_length
+            sample_len = (3 if self.modality in ['RGB', 'Freq'] else 2) * self.new_length
 
             if self.modality == 'RGBDiff':
                 sample_len = 3 * self.new_length
@@ -286,7 +403,7 @@ class TSN(nn.Module):
             else:
                 base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])
             output = self.consensus(base_out)
-            return output.squeeze(1)
+            return output.squeeze(1), r_t
 
     def _get_diff(self, input, keep_rgb=False):
         input_c = 3 if self.modality in ["RGB", "RGBDiff"] else 2
@@ -393,4 +510,7 @@ class TSN(nn.Module):
                                                    GroupRandomHorizontalFlip(is_flow=True)])
         elif self.modality == 'RGBDiff':
             return torchvision.transforms.Compose([GroupMultiScaleCrop(self.input_size, [1, .875, .75]),
+                                                   GroupRandomHorizontalFlip(is_flow=False)])
+        elif self.modality == 'Freq':
+            return torchvision.transforms.Compose([GroupMultiScaleCrop(self.input_size, [1, .875, .75, .66]),
                                                    GroupRandomHorizontalFlip(is_flow=False)])

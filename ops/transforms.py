@@ -61,17 +61,19 @@ class GroupRandomHorizontalFlip(object):
 
 
 class GroupNormalize(object):
-    def __init__(self, mean, std):
+    def __init__(self, mean, std, toggle):
         self.mean = mean
         self.std = std
+        self.toggle = toggle
 
     def __call__(self, tensor):
         rep_mean = self.mean * (tensor.size()[0]//len(self.mean))
         rep_std = self.std * (tensor.size()[0]//len(self.std))
 
         # TODO: make efficient
-        for t, m, s in zip(tensor, rep_mean, rep_std):
-            t.sub_(m).div_(s)
+        if not self.toggle:
+            for t, m, s in zip(tensor, rep_mean, rep_std):
+                t.sub_(m).div_(s)
 
         return tensor
 
@@ -316,7 +318,7 @@ class Stack(object):
 class ToTorchFormatTensor(object):
     """ Converts a PIL.Image (RGB) or numpy.ndarray (H x W x C) in the range [0, 255]
     to a torch.FloatTensor of shape (C x H x W) in the range [0.0, 1.0] """
-    def __init__(self, div=True):
+    def __init__(self, div):
         self.div = div
 
     def __call__(self, pic):
