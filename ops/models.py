@@ -19,7 +19,7 @@ def make_a_linear(input_dim, output_dim):
     return linear_model
 
 def conv1x1(in_planes, out_planes):
-    return nn.Conv2d(in_planes, out_planes, kernel_size=1)
+    return nn.Conv1d(in_planes, out_planes, kernel_size=1)
 
 def DCTmatrix_hat(C, length):
     C_hat = torch.zeros(3 * length, 3 * length)
@@ -64,7 +64,7 @@ class TSN(nn.Module):
             raise ValueError("Only avg consensus can be used after Softmax")
 
         if new_length is None:
-            self.new_length = 1 if modality == "RGB" else 5
+            self.new_length = 1 if modality in ["RGB", "Freq"] else 5
         else:
             self.new_length = new_length
         if print_spec:
@@ -235,13 +235,15 @@ class TSN(nn.Module):
         normal_bias = []
         lr5_weight = []
         lr10_bias = []
+        lr50_weight = []
+        lr100_bias = []
         bn = []
         custom_ops = []
 
         conv_cnt = 0
         bn_cnt = 0
         for m in self.modules():
-            if isinstance(m, torch.nn.Conv2d) or isinstance(m, torch.nn.Conv1d) or isinstance(m, torch.nn.Conv3d):
+            if isinstance(m, torch.nn.Conv2d) or isinstance(m, torch.nn.Conv3d):
                 ps = list(m.parameters())
                 conv_cnt += 1
                 if conv_cnt == 1:
@@ -252,6 +254,25 @@ class TSN(nn.Module):
                     normal_weight.append(ps[0])
                     if len(ps) == 2:
                         normal_bias.append(ps[1])
+
+            elif isinstance(m, torch.nn.Conv1d):
+                ps = list(m.parameters())
+                conv_cnt += 1
+                if conv_cnt == 1:
+                    first_conv_weight.append(ps[0])
+                    if len(ps) == 2:
+                        first_conv_bias.append(ps[1])
+                else:
+                    if self.freq_selection:
+                        lr50_weight.append(ps[0])
+                    else:
+                        normal_weight.append(ps[0])
+                    if len(ps) == 2:
+                        if self.freq_selection:
+                            lr100_bias.append(ps[1])
+                        else:
+                            normal_bias.append(ps[1])
+
             elif isinstance(m, torch.nn.Linear):
                 ps = list(m.parameters())
                 if self.fc_lr5:
@@ -269,19 +290,21 @@ class TSN(nn.Module):
                 # later BN's are frozen
                 if not self._enable_pbn or bn_cnt == 1:
                     bn.extend(list(m.parameters()))
+
             elif isinstance(m, torch.nn.BatchNorm3d):
                 bn_cnt += 1
                 # later BN's are frozen
                 if not self._enable_pbn or bn_cnt == 1:
                     bn.extend(list(m.parameters()))
+
             elif len(m._modules) == 0:
                 if len(list(m.parameters())) > 0:
                     raise ValueError("New atomic module type: {}. Need to give it a learning policy".format(type(m)))
 
         return [
-            {'params': first_conv_weight, 'lr_mult': 5 if self.modality == 'Flow' else 1, 'decay_mult': 1,
+            {'params': first_conv_weight, 'lr_mult': 5 if self.modality in ['Flow', 'Freq'] else 1, 'decay_mult': 1,
              'name': "first_conv_weight"},
-            {'params': first_conv_bias, 'lr_mult': 10 if self.modality == 'Flow' else 2, 'decay_mult': 0,
+            {'params': first_conv_bias, 'lr_mult': 10 if self.modality in ['Flow', 'Freq'] else 2, 'decay_mult': 0,
              'name': "first_conv_bias"},
             {'params': normal_weight, 'lr_mult': 1, 'decay_mult': 1,
              'name': "normal_weight"},
@@ -296,14 +319,20 @@ class TSN(nn.Module):
              'name': "lr5_weight"},
             {'params': lr10_bias, 'lr_mult': 10, 'decay_mult': 0,
              'name': "lr10_bias"},
+            {'params': lr50_weight, 'lr_mult': 50, 'decay_mult': 1,
+             'name': "lr5_weight"},
+            {'params': lr100_bias, 'lr_mult': 100, 'decay_mult': 0,
+             'name': "lr10_bias"}
         ]
 
-    def forward(self, input, no_reshape=False):
+    def forward(self, input, cur_epoch, warm_up_epoch=None, no_reshape=False):
         if self.freq_selection:
             batch_size = input.shape[0]
             height = input.shape[2]
             width = input.shape[3]
-            tau = 1
+            tau = 0.5
+            freq_mean = [0, 0, 0]
+            freq_std = [1, 1, 1]
 
             # TODO: RGBRGBRGB... -> RRR...GGG...BBB...
             r_indices = (torch.arange(self.num_segments) * 3).cuda()
@@ -312,33 +341,27 @@ class TSN(nn.Module):
             input_b = torch.index_select(input.reshape(batch_size, 3 * self.num_segments, -1), 1, r_indices + 2)
             input_reshape = torch.cat((input_r, input_g, input_b), dim=1)
 
-            # TODO: normal DCT
+            # TODO: DCT
             input_DCT = []
             self.DCT_hat = self.DCT_hat.cuda()
             for batch in range(batch_size):
                 input_DCT.append(torch.matmul(self.DCT_hat, input_reshape[batch, :, :]).unsqueeze(0))
             input_DCT = torch.cat(input_DCT, 0)
 
-            # TODO: normalize
-
+            # TODO: normalize in the frequency domain
+            input_DCT_norm = torch.zeros_like(input_DCT).cuda()
+            input_DCT_norm[:, : self.num_segments, :] = \
+                (input_DCT[:, : self.num_segments, :] - freq_mean[0]) / freq_std[0]
+            input_DCT_norm[:, self.num_segments: 2 * self.num_segments, :] = \
+                (input_DCT[:, self.num_segments: 2 * self.num_segments, :] - freq_mean[1]) / freq_std[1]
+            input_DCT_norm[:, 2 * self.num_segments: 3 * self.num_segments, :] = \
+                (input_DCT[:, 2 * self.num_segments: 3 * self.num_segments, :] - freq_mean[2]) / freq_std[2]
 
             # TODO: policy network
-            mean_per_freq = torch.mean(input_DCT.reshape(3 * batch_size, self.num_segments, -1), dim=2).squeeze()
-
-            ### using diff between freqs
-            mean_and_diff_per_freq = torch.zeros(3 * batch_size, 2 * self.num_segments - 1).cuda()
-            for i in range(2 * self.num_segments - 1):
-                if i % 2 == 0:
-                    mean_and_diff_per_freq[:, i] = mean_per_freq[:, i // 2]
-                else:
-                    mean_and_diff_per_freq[:, i] = mean_per_freq[:, (i // 2) + 1] - mean_per_freq[:, i // 2]
-            feat_3channel = self.policy_linear(mean_and_diff_per_freq)
-
-            ### not using diff
-            # feat_3channel = mean_per_freq.reshape(batch_size, 3, self.num_segments).unsqueeze(-1)
-
-            feat_2channel = self.policy_1x1(feat_3channel.reshape(batch_size, 3, self.num_segments).unsqueeze(-1))
-            p_t = torch.log(F.softmax(feat_2channel.squeeze(), dim=1).clamp(min=1e-8))
+            mean_per_freq = torch.mean(input_DCT_norm, dim=2)
+            feat_3channel = mean_per_freq.reshape(batch_size, 3, self.num_segments)
+            feat_2channel = self.policy_1x1(feat_3channel)
+            p_t = torch.log(F.softmax(feat_2channel, dim=1).clamp(min=1e-8))
 
             # r_t = torch.cat(
             #     [F.gumbel_softmax(p_t[b_i:b_i + 1], tau=tau, hard=True, dim=1) for b_i in range(p_t.shape[0])])
@@ -346,26 +369,35 @@ class TSN(nn.Module):
             mask = r_t[:, 0, :].clone()
 
             # TODO: masking
-            # normalize
-            input_reshape_norm = input_reshape / 255
-            input_reshape_norm[:, : self.num_segments, :] = \
-                (input_reshape[:, : self.num_segments, :] - self.input_mean[0]) / self.input_std[0]
-            input_reshape_norm[:, self.num_segments: 2 * self.num_segments, :] = \
-                (input_reshape[:, self.num_segments: 2 * self.num_segments, :] - self.input_mean[1]) / self.input_std[1]
-            input_reshape_norm[:, 2 * self.num_segments: 3 * self.num_segments, :] = \
-                (input_reshape[:, 2 * self.num_segments: 3 * self.num_segments, :] - self.input_mean[2]) / self.input_std[2]
+            if self.modality == 'RGB':
+                # normalize in the time domain
+                input_reshape_norm = input_reshape / 255
+                input_reshape_norm[:, : self.num_segments, :] = \
+                    (input_reshape[:, : self.num_segments, :] - self.input_mean[0]) / self.input_std[0]
+                input_reshape_norm[:, self.num_segments: 2 * self.num_segments, :] = \
+                    (input_reshape[:, self.num_segments: 2 * self.num_segments, :] - self.input_mean[1]) / self.input_std[1]
+                input_reshape_norm[:, 2 * self.num_segments: 3 * self.num_segments, :] = \
+                    (input_reshape[:, 2 * self.num_segments: 3 * self.num_segments, :] - self.input_mean[2]) / self.input_std[2]
 
-            mask_exp = mask.repeat(1, 3)
-            input_masked = torch.zeros_like(input_reshape_norm)
-            for i in range(batch_size):
-                masked_DCT_hat = mask_exp[i, :].unsqueeze(-1) * self.DCT_hat
-                if self.modality == 'Freq':  ### learning in frequency domain
-                    input_masked[i] = torch.matmul(masked_DCT_hat, input_reshape_norm[i])
-                elif self.modality == 'RGB':  ### learning in time domain
-                    input_masked[i] = torch.matmul(torch.transpose(masked_DCT_hat, 0, 1),
-                                                    torch.matmul(masked_DCT_hat, input_reshape_norm[i]))
+                if warm_up_epoch != None and warm_up_epoch < cur_epoch:
+                    mask_exp = mask.repeat(1, 3)
+                    input_masked = torch.zeros_like(input_reshape_norm)
+                    for i in range(batch_size):
+                        masked_DCT_hat = mask_exp[i, :].unsqueeze(-1) * self.DCT_hat
+                        input_masked[i] = torch.matmul(torch.transpose(masked_DCT_hat, 0, 1),
+                                                            torch.matmul(masked_DCT_hat, input_reshape_norm[i]))
                 else:
-                    NotImplementedError("Inappropriate modality!")
+                    input_masked = input_reshape_norm
+            elif self.modality == 'Freq':
+                if warm_up_epoch != None and warm_up_epoch < cur_epoch:
+                    mask_exp = mask.repeat(1, 3)
+                    input_masked = torch.zeros_like(input_DCT_norm)
+                    for i in range(batch_size):
+                        input_masked[i] = mask_exp[i, :].unsqueeze(-1) * input_DCT_norm[i]
+                else:
+                    input_masked = input_DCT_norm
+            else:
+                NotImplementedError("Inappropriate modality!")
 
             # TODO: RRR...GGG...BBB... -> RGBRGBRGB...
             input_new = torch.zeros_like(input_masked).cuda()

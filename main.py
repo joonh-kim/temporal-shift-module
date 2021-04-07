@@ -287,17 +287,19 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
         target_var = torch.autograd.Variable(target)
 
         # compute output
-        output, r_t = model(input_var)
+        output, r_t = model(input_var, i, args.warm_up_epoch)
         loss = criterion(output, target_var)
-        if args.freq_selection:
+        if args.freq_selection and i > args.warm_up_epoch:
             eff_loss = torch.mean(r_t[:, 0, :].sum(dim=1))
+        else:
+            eff_loss = 0
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
         losses.update(loss.item(), input.size(0))
         top1.update(prec1.item(), input.size(0))
         top5.update(prec5.item(), input.size(0))
-        if args.freq_selection:
+        if args.freq_selection and i > args.warm_up_epoch:
             eff_losses.update(eff_loss.item(), input.size(0))
             loss = (1 - args.eff_loss_weight) * loss + args.eff_loss_weight * eff_loss
 
@@ -367,7 +369,7 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
             target = target.cuda()
 
             # compute output
-            output, r_t = model(input)
+            output, r_t = model(input, i)
             loss = criterion(output, target)
             if args.freq_selection:
                 eff_loss = torch.mean(r_t[:, 0, :].sum(dim=1))

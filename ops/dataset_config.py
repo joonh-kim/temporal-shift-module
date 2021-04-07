@@ -102,7 +102,7 @@ def return_kinetics(modality):
 
 def return_minikinetics(modality):
     filename_categories = 200
-    if modality == 'RGB':
+    if modality in ['RGB', 'Freq']:
         root_data = ROOT_DATASET + 'minikinetics/frames/images'
         filename_imglist_train = 'minikinetics/labels/train_videofolder.txt'
         filename_imglist_val = 'minikinetics/labels/val_videofolder.txt'
