@@ -320,9 +320,9 @@ class TSN(nn.Module):
             {'params': lr10_bias, 'lr_mult': 10, 'decay_mult': 0,
              'name': "lr10_bias"},
             {'params': lr50_weight, 'lr_mult': 50, 'decay_mult': 1,
-             'name': "lr5_weight"},
+             'name': "lr50_weight"},
             {'params': lr100_bias, 'lr_mult': 100, 'decay_mult': 0,
-             'name': "lr10_bias"}
+             'name': "lr100_bias"}
         ]
 
     def forward(self, input, cur_epoch, warm_up_epoch=None, no_reshape=False):
@@ -333,6 +333,8 @@ class TSN(nn.Module):
             tau = 0.5
             freq_mean = [0, 0, 0]
             freq_std = [1, 1, 1]
+            freqwise_mean = torch.tensor([[0, 0, 0]] * self.num_segments).cuda()
+            freqwise_std = torch.tensor([[1, 1, 1]] * self.num_segments).cuda()
 
             # TODO: RGBRGBRGB... -> RRR...GGG...BBB...
             r_indices = (torch.arange(self.num_segments) * 3).cuda()
@@ -379,7 +381,7 @@ class TSN(nn.Module):
                 input_reshape_norm[:, 2 * self.num_segments: 3 * self.num_segments, :] = \
                     (input_reshape[:, 2 * self.num_segments: 3 * self.num_segments, :] - self.input_mean[2]) / self.input_std[2]
 
-                if warm_up_epoch != None and warm_up_epoch < cur_epoch:
+                if cur_epoch == None or warm_up_epoch <= cur_epoch:
                     mask_exp = mask.repeat(1, 3)
                     input_masked = torch.zeros_like(input_reshape_norm)
                     for i in range(batch_size):
@@ -389,13 +391,25 @@ class TSN(nn.Module):
                 else:
                     input_masked = input_reshape_norm
             elif self.modality == 'Freq':
-                if warm_up_epoch != None and warm_up_epoch < cur_epoch:
+                # TODO: frequency-wise normalization
+                input_DCT_freqnorm = torch.zeros_like(input_DCT).cuda()
+                input_DCT_freqnorm[:, : self.num_segments, :] = (input_DCT[:, : self.num_segments, :]
+                                                                 - freqwise_mean[:, 0].unsqueeze(0).unsqueeze(-1)) \
+                                                                / freqwise_std[:, 0].unsqueeze(0).unsqueeze(-1)
+                input_DCT_freqnorm[:, self.num_segments: 2 * self.num_segments, :] = (input_DCT[:, self.num_segments: 2 * self.num_segments, :]
+                                                                                      - freqwise_mean[:, 1].unsqueeze(0).unsqueeze(-1)) \
+                                                                                     / freqwise_std[:, 1].unsqueeze(0).unsqueeze(-1)
+                input_DCT_freqnorm[:, 2 * self.num_segments: 3 * self.num_segments, :] = (input_DCT[:, 2 * self.num_segments: 3 * self.num_segments, :]
+                                                                                          - freqwise_mean[:, 2].unsqueeze(0).unsqueeze(-1)) \
+                                                                                         / freqwise_std[:, 2].unsqueeze(0).unsqueeze(-1)
+
+                if cur_epoch == None or warm_up_epoch <= cur_epoch:
                     mask_exp = mask.repeat(1, 3)
-                    input_masked = torch.zeros_like(input_DCT_norm)
+                    input_masked = torch.zeros_like(input_DCT_freqnorm)
                     for i in range(batch_size):
-                        input_masked[i] = mask_exp[i, :].unsqueeze(-1) * input_DCT_norm[i]
+                        input_masked[i] = mask_exp[i, :].unsqueeze(-1) * input_DCT_freqnorm[i]
                 else:
-                    input_masked = input_DCT_norm
+                    input_masked = input_DCT_freqnorm
             else:
                 NotImplementedError("Inappropriate modality!")
 

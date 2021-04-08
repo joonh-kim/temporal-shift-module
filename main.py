@@ -222,7 +222,7 @@ def main():
             group['name'], len(group['params']), group['lr_mult'], group['decay_mult'])))
 
     if args.evaluate:
-        validate(val_loader, model, criterion, 0)
+        validate(val_loader, model, criterion, None)
         return
 
     log_training = open(os.path.join(args.root_log, args.store_name, 'log.csv'), 'w')
@@ -267,7 +267,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
     top1 = AverageMeter()
     top5 = AverageMeter()
     if args.freq_selection:
-        eff_losses = AverageMeter()
+        selected_freqs = AverageMeter()
 
     if args.no_partialbn:
         model.module.partialBN(False)
@@ -287,21 +287,21 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
         target_var = torch.autograd.Variable(target)
 
         # compute output
-        output, r_t = model(input_var, i, args.warm_up_epoch)
+        output, r_t = model(input_var, epoch, args.warm_up_epoch)
         loss = criterion(output, target_var)
-        if args.freq_selection and i > args.warm_up_epoch:
-            eff_loss = torch.mean(r_t[:, 0, :].sum(dim=1))
-        else:
-            eff_loss = 0
+        if args.freq_selection:
+            if epoch >= args.warm_up_epoch:
+                selected_freq = torch.mean(r_t[:, 0, :].sum(dim=1))
+            else:
+                selected_freq = torch.tensor(args.num_segments)
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
         losses.update(loss.item(), input.size(0))
         top1.update(prec1.item(), input.size(0))
         top5.update(prec5.item(), input.size(0))
-        if args.freq_selection and i > args.warm_up_epoch:
-            eff_losses.update(eff_loss.item(), input.size(0))
-            loss = (1 - args.eff_loss_weight) * loss + args.eff_loss_weight * eff_loss
+        if args.freq_selection:
+            selected_freqs.update(selected_freq.item(), input.size(0))
 
         # compute gradient and do SGD step
         loss.backward()
@@ -322,11 +322,11 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
                           'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                           'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                           'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                          'Eff Loss {eff_loss.val:.4f} ({eff_loss.avg:.4f})\t'
+                          '#Freqs {selected_freqs.val:.4f} ({selected_freqs.avg:.4f})\t'
                           'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                           'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                     epoch, i, len(train_loader), batch_time=batch_time,
-                    data_time=data_time, loss=losses, eff_loss=eff_losses, top1=top1, top5=top5,
+                    data_time=data_time, loss=losses, selected_freqs=selected_freqs, top1=top1, top5=top5,
                     lr=optimizer.param_groups[-1]['lr'] * 0.1))
             else:
                 output = ('Epoch: [{0}][{1}/{2}], lr: {lr:.5f}\t'
@@ -346,7 +346,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
     tf_writer.add_scalar('acc/train_top5', top5.avg, epoch)
     tf_writer.add_scalar('lr', optimizer.param_groups[-1]['lr'], epoch)
     if args.freq_selection:
-        tf_writer.add_scalar('eff_loss/train', eff_losses.avg, epoch)
+        tf_writer.add_scalar('selected_freqs/train', selected_freqs.avg, epoch)
 
 
 def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
@@ -355,7 +355,7 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
     top1 = AverageMeter()
     top5 = AverageMeter()
     if args.freq_selection:
-        eff_losses = AverageMeter()
+        selected_freqs = AverageMeter()
 
     all_results = []
     all_targets = []
@@ -369,10 +369,13 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
             target = target.cuda()
 
             # compute output
-            output, r_t = model(input, i)
+            output, r_t = model(input, epoch, args.warm_up_epoch)
             loss = criterion(output, target)
             if args.freq_selection:
-                eff_loss = torch.mean(r_t[:, 0, :].sum(dim=1))
+                if epoch >= args.warm_up_epoch:
+                    selected_freq = torch.mean(r_t[:, 0, :].sum(dim=1))
+                else:
+                    selected_freq = torch.tensor(args.num_segments)
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
@@ -381,7 +384,7 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
             top1.update(prec1.item(), input.size(0))
             top5.update(prec5.item(), input.size(0))
             if args.freq_selection:
-                eff_losses.update(eff_loss.item(), input.size(0))
+                selected_freqs.update(selected_freq.item(), input.size(0))
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -395,11 +398,11 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
                     output = ('Test: [{0}/{1}]\t'
                               'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                               'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                              'Eff Loss {eff_loss.val:.4f} ({eff_loss.avg:.4f})\t'
+                              '#Freqs {selected_freqs.val:.4f} ({selected_freqs.avg:.4f})\t'
                               'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                               'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                         i, len(val_loader), batch_time=batch_time, loss=losses,
-                        eff_loss=eff_losses, top1=top1, top5=top5))
+                        selected_freqs=selected_freqs, top1=top1, top5=top5))
                 else:
                     output = ('Test: [{0}/{1}]\t'
                               'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
@@ -414,10 +417,16 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
                     log.flush()
 
     mAP, _ = cal_map(torch.cat(all_results, 0).cpu(), torch.cat(all_targets, 0).unsqueeze(1).cpu())
-    output = ('Testing Results: mAP {mAP:.3f} Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} '
-              'Loss {loss.avg:.5f} Eff Loss {eff_loss.avg:.3f} Time {time:.3f}'
-              .format(mAP=mAP, top1=top1, top5=top5,
-                      loss=losses, eff_loss=eff_losses, time=batch_time.avg * len(val_loader)))
+    if args.freq_selection:
+        output = ('Testing Results: mAP {mAP:.3f} Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} '
+                  'Loss {loss.avg:.5f} #Freq {selected_freqs.avg:.3f} Time {time:.3f}'
+                  .format(mAP=mAP, top1=top1, top5=top5,
+                          loss=losses, selected_freqs=selected_freqs, time=batch_time.avg * len(val_loader)))
+    else:
+        output = ('Testing Results: mAP {mAP:.3f} Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} '
+                  'Loss {loss.avg:.5f} Time {time:.3f}'
+                  .format(mAP=mAP, top1=top1, top5=top5,
+                          loss=losses, time=batch_time.avg * len(val_loader)))
     print(output)
     if log is not None:
         log.write(output + '\n')
@@ -428,7 +437,7 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
         tf_writer.add_scalar('acc/test_top1', top1.avg, epoch)
         tf_writer.add_scalar('acc/test_top5', top5.avg, epoch)
         if args.freq_selection:
-            tf_writer.add_scalar('eff_loss/test', eff_losses.avg, epoch)
+            tf_writer.add_scalar('selected_freqs/test', selected_freqs.avg, epoch)
 
     return top1.avg
 

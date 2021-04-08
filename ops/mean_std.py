@@ -14,7 +14,7 @@ def mean_and_std(video, prefix, DCT):
     video, total_frame = item[0], item[1]
     if not os.path.exists(os.path.join(video, prefix.format(int(total_frame.zfill(5))))):
         print("Not found: {}".format(os.path.join(video, prefix.format(int(total_frame.zfill(5))))))
-        return np.array([None, None, None])
+        return np.array([[None, None, None]] * num_frames)
     else:
         if int(total_frame) >= 2 * num_frames:
             indices = np.arange(num_frames)
@@ -31,7 +31,7 @@ def mean_and_std(video, prefix, DCT):
                 freqs_r, freqs_g, freqs_b = np.matmul(DCT, imgs_r.reshape((num_frames, -1))), \
                                             np.matmul(DCT, imgs_g.reshape((num_frames, -1))), \
                                             np.matmul(DCT, imgs_b.reshape((num_frames, -1)))
-                rgb_freq.append(list(map(lambda x: np.mean(x), [freqs_r, freqs_g, freqs_b])))
+                rgb_freq.append(np.array(list(map(lambda x: np.mean(x, axis=1), [freqs_r, freqs_g, freqs_b]))).T)
             return np.mean(np.array(rgb_freq), axis=0)
         else:
             if int(total_frame) < num_frames:
@@ -47,14 +47,14 @@ def mean_and_std(video, prefix, DCT):
             freqs_r, freqs_g, freqs_b = np.matmul(DCT, imgs_r.reshape((num_frames, -1))), \
                                         np.matmul(DCT, imgs_g.reshape((num_frames, -1))), \
                                         np.matmul(DCT, imgs_b.reshape((num_frames, -1)))
-            return np.array(list(map(lambda x: torch.mean(x), [freqs_r, freqs_g, freqs_b])))
+            return np.array(list(map(lambda x: np.mean(x, axis=1), [freqs_r, freqs_g, freqs_b]))).T
 
 if __name__ == '__main__':
     dataset = 'minikinetics'
     modality = 'RGB'
     num_frames = 8
-    # num_process = multiprocessing.cpu_count()
-    num_process = 10
+    num_process = multiprocessing.cpu_count() - 4
+    # num_process = 10
 
     DCT = DCTmatrix(num_frames)
 
@@ -83,6 +83,15 @@ if __name__ == '__main__':
                                              pm_pbar=True, pm_processes=num_process))
                          , dtype=np.float64)
 
-    freqs_mean = np.nanmean(rgb_freqs, axis=0)
-    freqs_std = np.nanstd(rgb_freqs, axis=0)
-    print("Mean (RGB): {}, Std (RGB): {}".format(freqs_mean, freqs_std))
+    freqwise_mean = np.nanmean(rgb_freqs, axis=0)
+    freqwise_std = np.nanstd(rgb_freqs, axis=0)
+    total_mean = np.nanmean(rgb_freqs, axis=(0, 1))
+    total_std = np.nanstd(freqwise_mean, axis=0)
+    print("Frequency-wise mean: \n")
+    print(freqwise_mean)
+    print("Frequency-wise std: \n")
+    print(freqwise_std)
+    print("Channel-wise mean: \n")
+    print(total_mean)
+    print("Channel-wise std: \n")
+    print(total_std)

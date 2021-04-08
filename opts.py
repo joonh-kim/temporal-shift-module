@@ -32,7 +32,7 @@ parser.add_argument('--tune_from', type=str, default=None, help='fine-tune from 
 # ========================= Learning Configs ==========================
 parser.add_argument('--epochs', default=75, type=int, metavar='N',
                     help='number of total epochs to run')
-parser.add_argument('-b', '--batch-size', default=64, type=int,
+parser.add_argument('-b', '--batch-size', default=2, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
 parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate')
@@ -56,7 +56,7 @@ parser.add_argument('--eval-freq', '-ef', default=5, type=int,
 
 
 # ========================= Runtime Configs ==========================
-parser.add_argument('-j', '--workers', default=16, type=int, metavar='N',
+parser.add_argument('-j', '--workers', default=1, type=int, metavar='N',
                     help='number of data loading workers (default: 8)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
