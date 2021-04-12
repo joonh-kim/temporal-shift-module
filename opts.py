@@ -5,12 +5,12 @@
 
 import argparse
 parser = argparse.ArgumentParser(description="PyTorch implementation of Temporal Segment Networks")
-parser.add_argument('--freq-selection', default=True, action="store_false")
+parser.add_argument('--freq-selection', default=False, action="store_false")
 # parser.add_argument('--eff-loss-weight', '--elw', default=0.0005, type=float)
-parser.add_argument('--warm-up-epoch', default=40, type=int)
+parser.add_argument('--warm-up-epoch', default=None, type=int)
 
-parser.add_argument('--dataset', default="minikinetics", type=str)
-parser.add_argument('--modality', default="Freq", type=str, help='RGB, Flow, Freq')
+parser.add_argument('--dataset', default="somethingv2", type=str)
+parser.add_argument('--modality', default="RGB", type=str, help='RGB, Flow, Freq')
 parser.add_argument('--train_list', type=str, default="")
 parser.add_argument('--val_list', type=str, default="")
 parser.add_argument('--root_path', type=str, default="")
@@ -26,19 +26,19 @@ parser.add_argument('--loss_type', type=str, default="nll",
                     choices=['nll'])
 parser.add_argument('--img_feature_dim', default=256, type=int, help="the feature dimension for each frame")
 parser.add_argument('--suffix', type=str, default=None)
-parser.add_argument('--pretrain', type=str, default='scratch', help='imagenet, scratch')
+parser.add_argument('--pretrain', type=str, default='imagenet', help='imagenet, scratch')
 parser.add_argument('--tune_from', type=str, default=None, help='fine-tune from checkpoint')
 
 # ========================= Learning Configs ==========================
-parser.add_argument('--epochs', default=75, type=int, metavar='N',
+parser.add_argument('--epochs', default=50, type=int, metavar='N',
                     help='number of total epochs to run')
-parser.add_argument('-b', '--batch-size', default=64, type=int,
+parser.add_argument('-b', '--batch-size', default=2, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
 parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--lr_type', default='step', type=str,
                     metavar='LRtype', help='learning rate type')
-parser.add_argument('--lr_steps', default=[25, 50], type=float, nargs="+",
+parser.add_argument('--lr_steps', default=[20, 40], type=float, nargs="+",
                     metavar='LRSteps', help='epochs to decay learning rate by 10')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')

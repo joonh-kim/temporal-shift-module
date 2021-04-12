@@ -235,8 +235,8 @@ class TSN(nn.Module):
         normal_bias = []
         lr5_weight = []
         lr10_bias = []
-        lr50_weight = []
-        lr100_bias = []
+        conv1_weight = []
+        conv1_bias = []
         bn = []
         custom_ops = []
 
@@ -264,12 +264,12 @@ class TSN(nn.Module):
                         first_conv_bias.append(ps[1])
                 else:
                     if self.freq_selection:
-                        lr5_weight.append(ps[0])
+                        conv1_weight.append(ps[0])
                     else:
                         normal_weight.append(ps[0])
                     if len(ps) == 2:
                         if self.freq_selection:
-                            lr10_bias.append(ps[1])
+                            conv1_bias.append(ps[1])
                         else:
                             normal_bias.append(ps[1])
 
@@ -301,29 +301,55 @@ class TSN(nn.Module):
                 if len(list(m.parameters())) > 0:
                     raise ValueError("New atomic module type: {}. Need to give it a learning policy".format(type(m)))
 
-        return [
-            {'params': first_conv_weight, 'lr_mult': 5 if self.modality in ['Flow', 'Freq'] else 1, 'decay_mult': 1,
-             'name': "first_conv_weight"},
-            {'params': first_conv_bias, 'lr_mult': 10 if self.modality in ['Flow', 'Freq'] else 2, 'decay_mult': 0,
-             'name': "first_conv_bias"},
-            {'params': normal_weight, 'lr_mult': 1, 'decay_mult': 1,
-             'name': "normal_weight"},
-            {'params': normal_bias, 'lr_mult': 2, 'decay_mult': 0,
-             'name': "normal_bias"},
-            {'params': bn, 'lr_mult': 1, 'decay_mult': 0,
-             'name': "BN scale/shift"},
-            {'params': custom_ops, 'lr_mult': 1, 'decay_mult': 1,
-             'name': "custom_ops"},
-            # for fc
-            {'params': lr5_weight, 'lr_mult': 5, 'decay_mult': 1,
-             'name': "lr5_weight"},
-            {'params': lr10_bias, 'lr_mult': 10, 'decay_mult': 0,
-             'name': "lr10_bias"},
-            # {'params': lr50_weight, 'lr_mult': 50, 'decay_mult': 1,
-            #  'name': "lr50_weight"},
-            # {'params': lr100_bias, 'lr_mult': 100, 'decay_mult': 0,
-            #  'name': "lr100_bias"}
-        ]
+        if self.modality == 'Freq':
+            group_policies = [
+                {'params': first_conv_weight, 'lr_mult': 1, 'decay_mult': 1,
+                 'name': "first_conv_weight"},
+                {'params': first_conv_bias, 'lr_mult': 1, 'decay_mult': 1,
+                 'name': "first_conv_bias"},
+                {'params': normal_weight, 'lr_mult': 1, 'decay_mult': 1,
+                 'name': "normal_weight"},
+                {'params': normal_bias, 'lr_mult': 1, 'decay_mult': 1,
+                 'name': "normal_bias"},
+                {'params': bn, 'lr_mult': 1, 'decay_mult': 1,
+                 'name': "BN scale/shift"},
+                {'params': custom_ops, 'lr_mult': 1, 'decay_mult': 1,
+                 'name': "custom_ops"},
+                # for fc
+                {'params': lr5_weight, 'lr_mult': 1, 'decay_mult': 1,
+                 'name': "lr5_weight"},
+                {'params': lr10_bias, 'lr_mult': 1, 'decay_mult': 1,
+                 'name': "lr10_bias"},
+                {'params': conv1_weight, 'lr_mult': 10, 'decay_mult': 1,
+                 'name': "conv1_weight"},
+                {'params': conv1_bias, 'lr_mult': 10, 'decay_mult': 1,
+                 'name': "conv1_bias"}
+            ]
+        else:
+            group_policies = [
+                {'params': first_conv_weight, 'lr_mult': 5 if self.modality == 'Flow' else 1, 'decay_mult': 1,
+                 'name': "first_conv_weight"},
+                {'params': first_conv_bias, 'lr_mult': 10 if self.modality == 'Flow' else 2, 'decay_mult': 0,
+                 'name': "first_conv_bias"},
+                {'params': normal_weight, 'lr_mult': 1, 'decay_mult': 1,
+                 'name': "normal_weight"},
+                {'params': normal_bias, 'lr_mult': 2, 'decay_mult': 0,
+                 'name': "normal_bias"},
+                {'params': bn, 'lr_mult': 1, 'decay_mult': 0,
+                 'name': "BN scale/shift"},
+                {'params': custom_ops, 'lr_mult': 1, 'decay_mult': 1,
+                 'name': "custom_ops"},
+                # for fc
+                {'params': lr5_weight, 'lr_mult': 5, 'decay_mult': 1,
+                 'name': "lr5_weight"},
+                {'params': lr10_bias, 'lr_mult': 10, 'decay_mult': 0,
+                 'name': "lr10_bias"},
+                {'params': conv1_weight, 'lr_mult': 5, 'decay_mult': 1,
+                 'name': "conv1_weight"},
+                {'params': conv1_bias, 'lr_mult': 10, 'decay_mult': 0,
+                 'name': "conv1_bias"}
+            ]
+        return group_policies
 
     def forward(self, input, cur_epoch, warm_up_epoch=None, no_reshape=False):
         if self.freq_selection:
