@@ -6,8 +6,8 @@
 import argparse
 parser = argparse.ArgumentParser(description="PyTorch implementation of Temporal Segment Networks")
 parser.add_argument('--freq-selection', default=True, action="store_false")
-parser.add_argument('--eff-loss-weight', '--elw', default=0.0005, type=float)
-parser.add_argument('--warm-up-epoch', default=25, type=int)
+# parser.add_argument('--eff-loss-weight', '--elw', default=0.0005, type=float)
+parser.add_argument('--warm-up-epoch', default=40, type=int)
 
 parser.add_argument('--dataset', default="minikinetics", type=str)
 parser.add_argument('--modality', default="Freq", type=str, help='RGB, Flow, Freq')
@@ -16,7 +16,7 @@ parser.add_argument('--val_list', type=str, default="")
 parser.add_argument('--root_path', type=str, default="")
 # ========================= Model Configs ==========================
 parser.add_argument('--arch', type=str, default="resnet50")
-parser.add_argument('--num_segments', type=int, default=2)
+parser.add_argument('--num_segments', type=int, default=8)
 parser.add_argument('--consensus_type', type=str, default='avg')
 parser.add_argument('--k', type=int, default=3)
 
@@ -32,7 +32,7 @@ parser.add_argument('--tune_from', type=str, default=None, help='fine-tune from 
 # ========================= Learning Configs ==========================
 parser.add_argument('--epochs', default=75, type=int, metavar='N',
                     help='number of total epochs to run')
-parser.add_argument('-b', '--batch-size', default=2, type=int,
+parser.add_argument('-b', '--batch-size', default=64, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
 parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate')
@@ -56,7 +56,7 @@ parser.add_argument('--eval-freq', '-ef', default=5, type=int,
 
 
 # ========================= Runtime Configs ==========================
-parser.add_argument('-j', '--workers', default=1, type=int, metavar='N',
+parser.add_argument('-j', '--workers', default=16, type=int, metavar='N',
                     help='number of data loading workers (default: 8)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')

@@ -86,7 +86,7 @@ if __name__ == '__main__':
     freqwise_mean = np.nanmean(rgb_freqs, axis=0)
     freqwise_std = np.nanstd(rgb_freqs, axis=0)
     total_mean = np.nanmean(rgb_freqs, axis=(0, 1))
-    total_std = np.nanstd(freqwise_mean, axis=0)
+    total_std = np.nanstd(rgb_freqs, axis=(0, 1))
     print("Frequency-wise mean: \n")
     print(freqwise_mean)
     print("Frequency-wise std: \n")
@@ -95,3 +95,4 @@ if __name__ == '__main__':
     print(total_mean)
     print("Channel-wise std: \n")
     print(total_std)
+    print("\n")

@@ -45,6 +45,8 @@ def main():
         full_arch_name += '_tpool'
     if args.freq_selection:
         full_arch_name += '_freqselection'
+    if args.warm_up_epoch != None:
+        full_arch_name += '_warmup{}'.format(args.warm_up_epoch)
     args.store_name = '_'.join(
         ['TSM', args.dataset, args.modality, full_arch_name, args.consensus_type, 'segment%d' % args.num_segments,
          'e{}'.format(args.epochs)])
@@ -148,37 +150,6 @@ def main():
     elif args.modality in ['Flow', 'RGBDiff']:
         data_length = 5
 
-    train_loader = torch.utils.data.DataLoader(
-        TSNDataSet(args.root_path, args.train_list, num_segments=args.num_segments,
-                   new_length=data_length,
-                   modality=args.modality,
-                   image_tmpl=prefix,
-                   transform=torchvision.transforms.Compose([
-                       train_augmentation,
-                       Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
-                       ToTorchFormatTensor(div=(args.arch not in ['BNInception', 'InceptionV3'] and not args.freq_selection)),
-                       normalize,
-                   ]), dense_sample=args.dense_sample),
-        batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=True,
-        drop_last=True)  # prevent something not % n_GPU
-
-    val_loader = torch.utils.data.DataLoader(
-        TSNDataSet(args.root_path, args.val_list, num_segments=args.num_segments,
-                   new_length=data_length,
-                   modality=args.modality,
-                   image_tmpl=prefix,
-                   random_shift=False,
-                   transform=torchvision.transforms.Compose([
-                       GroupScale(int(scale_size)),
-                       GroupCenterCrop(crop_size),
-                       Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
-                       ToTorchFormatTensor(div=(args.arch not in ['BNInception', 'InceptionV3'] and not args.freq_selection)),
-                       normalize,
-                   ]), dense_sample=args.dense_sample),
-        batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
-
     if args.dataset == 'minikinetics':
         train_loader = torch.utils.data.DataLoader(
             TSNDataSet(args.root_path + '/train/', args.train_list, num_segments=args.num_segments,
@@ -206,6 +177,39 @@ def main():
                            GroupCenterCrop(crop_size),
                            Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
                            ToTorchFormatTensor(div=(args.arch not in ['BNInception', 'InceptionV3'] and not args.freq_selection)),
+                           normalize,
+                       ]), dense_sample=args.dense_sample),
+            batch_size=args.batch_size, shuffle=False,
+            num_workers=args.workers, pin_memory=True)
+    else:
+        train_loader = torch.utils.data.DataLoader(
+            TSNDataSet(args.root_path, args.train_list, num_segments=args.num_segments,
+                       new_length=data_length,
+                       modality=args.modality,
+                       image_tmpl=prefix,
+                       transform=torchvision.transforms.Compose([
+                           train_augmentation,
+                           Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
+                           ToTorchFormatTensor(
+                               div=(args.arch not in ['BNInception', 'InceptionV3'] and not args.freq_selection)),
+                           normalize,
+                       ]), dense_sample=args.dense_sample),
+            batch_size=args.batch_size, shuffle=True,
+            num_workers=args.workers, pin_memory=True,
+            drop_last=True)  # prevent something not % n_GPU
+
+        val_loader = torch.utils.data.DataLoader(
+            TSNDataSet(args.root_path, args.val_list, num_segments=args.num_segments,
+                       new_length=data_length,
+                       modality=args.modality,
+                       image_tmpl=prefix,
+                       random_shift=False,
+                       transform=torchvision.transforms.Compose([
+                           GroupScale(int(scale_size)),
+                           GroupCenterCrop(crop_size),
+                           Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
+                           ToTorchFormatTensor(
+                               div=(args.arch not in ['BNInception', 'InceptionV3'] and not args.freq_selection)),
                            normalize,
                        ]), dense_sample=args.dense_sample),
             batch_size=args.batch_size, shuffle=False,

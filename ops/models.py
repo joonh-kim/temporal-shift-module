@@ -264,12 +264,12 @@ class TSN(nn.Module):
                         first_conv_bias.append(ps[1])
                 else:
                     if self.freq_selection:
-                        lr50_weight.append(ps[0])
+                        lr5_weight.append(ps[0])
                     else:
                         normal_weight.append(ps[0])
                     if len(ps) == 2:
                         if self.freq_selection:
-                            lr100_bias.append(ps[1])
+                            lr10_bias.append(ps[1])
                         else:
                             normal_bias.append(ps[1])
 
@@ -319,10 +319,10 @@ class TSN(nn.Module):
              'name': "lr5_weight"},
             {'params': lr10_bias, 'lr_mult': 10, 'decay_mult': 0,
              'name': "lr10_bias"},
-            {'params': lr50_weight, 'lr_mult': 50, 'decay_mult': 1,
-             'name': "lr50_weight"},
-            {'params': lr100_bias, 'lr_mult': 100, 'decay_mult': 0,
-             'name': "lr100_bias"}
+            # {'params': lr50_weight, 'lr_mult': 50, 'decay_mult': 1,
+            #  'name': "lr50_weight"},
+            # {'params': lr100_bias, 'lr_mult': 100, 'decay_mult': 0,
+            #  'name': "lr100_bias"}
         ]
 
     def forward(self, input, cur_epoch, warm_up_epoch=None, no_reshape=False):
@@ -331,10 +331,24 @@ class TSN(nn.Module):
             height = input.shape[2]
             width = input.shape[3]
             tau = 0.5
-            freq_mean = [0, 0, 0]
-            freq_std = [1, 1, 1]
-            freqwise_mean = torch.tensor([[0, 0, 0]] * self.num_segments).cuda()
-            freqwise_std = torch.tensor([[1, 1, 1]] * self.num_segments).cuda()
+            freq_mean = [38.93153895,  36.49603519,  34.11526499]
+            freq_std = [103.21031231,  96.8493695,  90.48412606]
+            freqwise_mean = torch.tensor([[ 3.11999440e+02,  2.92734101e+02,  2.73512572e+02],
+                                          [ 1.31976900e-01,  4.65869393e-03,  1.07130773e-01],
+                                          [-7.42678419e-01, -8.82907354e-01, -8.00437933e-01],
+                                          [ 1.45772034e-01,  1.69715159e-01,  1.56224231e-01],
+                                          [ 1.94490182e-02,  3.83501204e-02,  3.46578196e-02],
+                                          [-1.36656539e-02, -1.99214745e-02, -2.45398486e-02],
+                                          [-1.46741678e-01, -1.39614321e-01, -1.30619307e-01],
+                                          [ 5.87596261e-02,  6.39000697e-02,  6.71322088e-02]]).cuda()
+            freqwise_std = torch.tensor([[ 99.39481043,  99.41126767, 105.53474589],
+                                         [ 23.90491416,  22.84780224,  23.67578776],
+                                         [ 16.03833016,  15.46310555,  16.23684146],
+                                         [ 12.05854863,  11.69103394,  12.07319077],
+                                         [  9.48843771,   9.19222063,   9.49688663],
+                                         [  7.61678615,   7.42603237,   7.62194055],
+                                         [  6.39031728,   6.23412457,   6.36752511],
+                                         [  5.77056411,   5.65715373,   5.81123869]]).cuda()
 
             # TODO: RGBRGBRGB... -> RRR...GGG...BBB...
             r_indices = (torch.arange(self.num_segments) * 3).cuda()
