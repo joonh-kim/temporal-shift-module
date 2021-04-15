@@ -10,6 +10,11 @@ from ops.transforms import *
 from torch.nn.init import normal_, constant_
 from ops.utils import DCTmatrix, DCTmatrix_hat
 
+def init_hidden(batch_size, cell_size):
+    init_cell = torch.Tensor(batch_size, cell_size).zero_()
+    if torch.cuda.is_available():
+        init_cell = init_cell.cuda()
+    return init_cell
 
 class TSN(nn.Module):
     def __init__(self, num_class, num_segments, modality,
@@ -19,6 +24,7 @@ class TSN(nn.Module):
                  crop_num=1, partial_bn=True, print_spec=True, pretrain='imagenet',
                  fc_lr5=False, two_stream=False):
         super(TSN, self).__init__()
+        self.num_class = num_class
         self.modality = modality
         self.num_segments = num_segments
         self.before_softmax = before_softmax
@@ -56,6 +62,7 @@ class TSN(nn.Module):
         if self.two_stream:
             self._prepare_freq_model(base_model)
             self._prepare_freq_tsn(num_class)
+            self.rnn = nn.LSTMCell(input_size=num_class, hidden_size=num_class, bias=True)
 
             self.DCT = DCTmatrix(num_segments)
             self.DCT_hat = DCTmatrix_hat(self.DCT, num_segments)
@@ -185,6 +192,7 @@ class TSN(nn.Module):
                 input_DCT.append(torch.matmul(self.DCT_hat, input_reshape[batch, :, :]).unsqueeze(0))
             input_DCT = torch.cat(input_DCT, 0)
 
+            # TODO: Frequency-wise normalization
             input_DCT_freqnorm = torch.zeros_like(input_DCT).cuda()
             input_DCT_freqnorm[:, : self.num_segments, :] = (input_DCT[:, : self.num_segments, :]
                                                              - freqwise_mean[:, 0].unsqueeze(0).unsqueeze(-1)) \
@@ -204,6 +212,7 @@ class TSN(nn.Module):
                                                                                      / freqwise_std[:, 2].unsqueeze(
                 0).unsqueeze(-1)
 
+            # TODO: RRR...GGG...BBB... -> RGBRGBRGB...
             input_new = torch.zeros_like(input_DCT_freqnorm).cuda()
             for i in range(3 * self.num_segments):
                 if i < self.num_segments:
@@ -214,6 +223,17 @@ class TSN(nn.Module):
                     input_new[:, 3 * (i - 2 * self.num_segments) + 2, :] = input_DCT_freqnorm[:, i, :]
             input_new = input_new.reshape(batch_size, self.num_segments, 3, -1)
             input_DCT_norm = input_new[:, 1:, :, :]
+
+            # input_new = torch.zeros_like(input_DCT).cuda()
+            # for i in range(3 * self.num_segments):
+            #     if i < self.num_segments:
+            #         input_new[:, 3 * i, :] = input_DCT[:, i, :]
+            #     elif i < 2 * self.num_segments:
+            #         input_new[:, 3 * (i - self.num_segments) + 1, :] = input_DCT[:, i, :]
+            #     else:
+            #         input_new[:, 3 * (i - 2 * self.num_segments) + 2, :] = input_DCT[:, i, :]
+            # input_new = input_new.reshape(batch_size, self.num_segments, 3, -1)
+            # input_DCT_norm = input_new[:, 1:, :, :]
 
 
             # # TODO: RRR...GGG...BBB... -> RGBRGBRGB...
@@ -247,9 +267,15 @@ class TSN(nn.Module):
 
             ######## forward ########
             freq_out = self.freq_model(input_DCT_norm.reshape(batch_size * (self.num_segments - 1), 3, height, width))
-            freq_out = freq_out.reshape(batch_size, (self.num_segments - 1), -1).mean(dim=1)
             if self.dropout > 0:
                 freq_out = self.freq_new_fc(freq_out)
+            freq_out = freq_out.reshape(batch_size, (self.num_segments - 1), -1)
+
+            hx = init_hidden(batch_size, self.num_class)
+            cx = init_hidden(batch_size, self.num_class)
+            for t in range(self.num_segments - 1):
+                hx, cx = self.rnn(freq_out[:, t], (hx, cx))
+            freq_out = hx
 
             if epoch == None or epoch >= warm_up_epoch:
                 base_out = self.base_model(input_norm.view((-1, 3) + input_norm.size()[-2:]))
@@ -272,7 +298,7 @@ class TSN(nn.Module):
 
             base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])
             output = self.consensus(base_out)
-            return output.squeeze(1)
+            return output.squeeze()
 
     @property
     def crop_size(self):
