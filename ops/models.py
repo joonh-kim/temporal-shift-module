@@ -212,6 +212,7 @@ class TSN(nn.Module):
                     input_new[:, 3 * (i - self.num_segments) + 1, :] = input_DCT_freqnorm[:, i, :]
                 else:
                     input_new[:, 3 * (i - 2 * self.num_segments) + 2, :] = input_DCT_freqnorm[:, i, :]
+            input_new = input_new.reshape(batch_size, self.num_segments, 3, -1)
             input_DCT_norm = input_new[:, 1:, :, :]
 
 
