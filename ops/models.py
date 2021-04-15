@@ -408,7 +408,7 @@ class TSN(nn.Module):
             # r_t = torch.cat(
             #     [F.gumbel_softmax(p_t[b_i:b_i + 1], tau=tau, hard=True, dim=1) for b_i in range(p_t.shape[0])])
             r_t = F.gumbel_softmax(p_t, tau, hard=True, dim=1)
-            mask = r_t[:, 0, :].clone()
+            mask = r_t[:, 1, :].clone()
 
             # TODO: masking
             if self.modality == 'RGB':

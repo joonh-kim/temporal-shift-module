@@ -295,7 +295,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
         loss = criterion(output, target_var)
         if args.freq_selection:
             if epoch >= args.warm_up_epoch:
-                selected_freq = torch.mean(r_t[:, 0, :].sum(dim=1))
+                selected_freq = torch.mean(r_t[:, 1, :].sum(dim=1))
             else:
                 selected_freq = torch.tensor(args.num_segments)
 
@@ -377,7 +377,7 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
             loss = criterion(output, target)
             if args.freq_selection:
                 if epoch >= args.warm_up_epoch:
-                    selected_freq = torch.mean(r_t[:, 0, :].sum(dim=1))
+                    selected_freq = torch.mean(r_t[:, 1, :].sum(dim=1))
                 else:
                     selected_freq = torch.tensor(args.num_segments)
 
