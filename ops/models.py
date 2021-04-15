@@ -61,8 +61,9 @@ class TSN(nn.Module):
 
         if self.two_stream:
             self._prepare_freq_model(base_model)
-            self._prepare_freq_tsn(num_class)
-            self.rnn = nn.LSTMCell(input_size=num_class, hidden_size=num_class, bias=True)
+            feature_dim = self._prepare_freq_tsn(num_class)
+            self.feature_dim = feature_dim
+            self.rnn = nn.LSTMCell(input_size=feature_dim, hidden_size=feature_dim, bias=True)
 
             self.DCT = DCTmatrix(num_segments)
             self.DCT_hat = DCTmatrix_hat(self.DCT, num_segments)
@@ -111,6 +112,7 @@ class TSN(nn.Module):
             if hasattr(self.freq_new_fc, 'weight'):
                 normal_(self.freq_new_fc.weight, 0, std)
                 constant_(self.freq_new_fc.bias, 0)
+        return feature_dim
 
     def _prepare_base_model(self, base_model):
         print('=> base model: {}'.format(base_model))
@@ -267,15 +269,15 @@ class TSN(nn.Module):
 
             ######## forward ########
             freq_out = self.freq_model(input_DCT_norm.reshape(batch_size * (self.num_segments - 1), 3, height, width))
-            if self.dropout > 0:
-                freq_out = self.freq_new_fc(freq_out)
-            freq_out = freq_out.reshape(batch_size, (self.num_segments - 1), -1)
 
-            hx = init_hidden(batch_size, self.num_class)
-            cx = init_hidden(batch_size, self.num_class)
+            hx = init_hidden(batch_size, self.feature_dim)
+            cx = init_hidden(batch_size, self.feature_dim)
             for t in range(self.num_segments - 1):
                 hx, cx = self.rnn(freq_out[:, t], (hx, cx))
             freq_out = hx
+
+            if self.dropout > 0:
+                freq_out = self.freq_new_fc(freq_out)
 
             if epoch == None or epoch >= warm_up_epoch:
                 base_out = self.base_model(input_norm.view((-1, 3) + input_norm.size()[-2:]))
