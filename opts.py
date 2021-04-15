@@ -13,11 +13,11 @@ parser.add_argument('--root_path', type=str, default="")
 
 # ========================= Custom Configs ==========================
 parser.add_argument('--two_stream', default=True, action="store_false", help='add frequency stream')
-parser.add_argument('--warm_up_epoch', default=100, type=int, help="0 when 1stream")
+parser.add_argument('--warm_up_epoch', default=0, type=int, help="0 when 1stream")
 
 # ========================= Model Configs ==========================
 parser.add_argument('--arch', type=str, default="resnet50")
-parser.add_argument('--num_segments', type=int, default=8)
+parser.add_argument('--num_segments', type=int, default=2)
 parser.add_argument('--consensus_type', type=str, default='avg')
 parser.add_argument('--k', type=int, default=3)
 
@@ -33,7 +33,7 @@ parser.add_argument('--tune_from', type=str, default=None, help='fine-tune from 
 # ========================= Learning Configs ==========================
 parser.add_argument('--epochs', default=150, type=int, metavar='N',
                     help='number of total epochs to run')
-parser.add_argument('-b', '--batch-size', default=64, type=int,
+parser.add_argument('-b', '--batch-size', default=8, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
 parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                     metavar='LR', help='initial learning rate')

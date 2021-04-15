@@ -33,8 +33,8 @@ def main():
     if args.two_stream:
         full_arch_name += '_2stream'
     args.store_name = '_'.join(
-        ['TSN', args.dataset, args.modality, full_arch_name, args.consensus_type, 'segment%d' % args.num_segments,
-         'e{}'.format(args.epochs)])
+        ['TSN', args.dataset, args.modality, full_arch_name, 'segment%d' % args.num_segments,
+         'e{}'.format(args.epochs), 'warmup{}'.format(args.warm_up_epoch)])
     if args.pretrain != 'imagenet':
         args.store_name += '_{}'.format(args.pretrain)
     if args.dense_sample:

@@ -58,7 +58,7 @@ class TSNDataSet(data.Dataset):
         try:
             return [Image.open(os.path.join(self.root_path, directory, self.image_tmpl.format(idx))).convert('RGB')]
         except Exception:
-            print('error loading image:', os.path.join(self.root_path, directory, self.image_tmpl.format(idx)))
+            # print('error loading image:', os.path.join(self.root_path, directory, self.image_tmpl.format(idx)))
             return [Image.open(os.path.join(self.root_path, directory, self.image_tmpl.format(1))).convert('RGB')]
 
     def _parse_list(self):

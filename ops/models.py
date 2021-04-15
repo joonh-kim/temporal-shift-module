@@ -154,6 +154,23 @@ class TSN(nn.Module):
             height = input.shape[2]
             width = input.shape[3]
 
+            freqwise_mean = torch.tensor([[3.11999440e+02, 2.92734101e+02, 2.73512572e+02],
+                                          [1.31976900e-01, 4.65869393e-03, 1.07130773e-01],
+                                          [-7.42678419e-01, -8.82907354e-01, -8.00437933e-01],
+                                          [1.45772034e-01, 1.69715159e-01, 1.56224231e-01],
+                                          [1.94490182e-02, 3.83501204e-02, 3.46578196e-02],
+                                          [-1.36656539e-02, -1.99214745e-02, -2.45398486e-02],
+                                          [-1.46741678e-01, -1.39614321e-01, -1.30619307e-01],
+                                          [5.87596261e-02, 6.39000697e-02, 6.71322088e-02]]).cuda()
+            freqwise_std = torch.tensor([[99.39481043, 99.41126767, 105.53474589],
+                                         [23.90491416, 22.84780224, 23.67578776],
+                                         [16.03833016, 15.46310555, 16.23684146],
+                                         [12.05854863, 11.69103394, 12.07319077],
+                                         [9.48843771, 9.19222063, 9.49688663],
+                                         [7.61678615, 7.42603237, 7.62194055],
+                                         [6.39031728, 6.23412457, 6.36752511],
+                                         [5.77056411, 5.65715373, 5.81123869]]).cuda()
+
             # TODO: RGBRGBRGB... -> RRR...GGG...BBB...
             r_indices = (torch.arange(self.num_segments) * 3).cuda()
             input_r = torch.index_select(input.reshape(batch_size, self.num_segments * 3, -1), 1, r_indices)
@@ -168,22 +185,53 @@ class TSN(nn.Module):
                 input_DCT.append(torch.matmul(self.DCT_hat, input_reshape[batch, :, :]).unsqueeze(0))
             input_DCT = torch.cat(input_DCT, 0)
 
-            # TODO: RRR...GGG...BBB... -> RGBRGBRGB...
-            input_DCT_reshape = torch.zeros_like(input_DCT).cuda()
+            input_DCT_freqnorm = torch.zeros_like(input_DCT).cuda()
+            input_DCT_freqnorm[:, : self.num_segments, :] = (input_DCT[:, : self.num_segments, :]
+                                                             - freqwise_mean[:, 0].unsqueeze(0).unsqueeze(-1)) \
+                                                            / freqwise_std[:, 0].unsqueeze(0).unsqueeze(-1)
+            input_DCT_freqnorm[:, self.num_segments: 2 * self.num_segments, :] = (input_DCT[:,
+                                                                                  self.num_segments: 2 * self.num_segments,
+                                                                                  :]
+                                                                                  - freqwise_mean[:, 1].unsqueeze(
+                        0).unsqueeze(-1)) \
+                                                                                 / freqwise_std[:, 1].unsqueeze(
+                0).unsqueeze(-1)
+            input_DCT_freqnorm[:, 2 * self.num_segments: 3 * self.num_segments, :] = (input_DCT[:,
+                                                                                      2 * self.num_segments: 3 * self.num_segments,
+                                                                                      :]
+                                                                                      - freqwise_mean[:, 2].unsqueeze(
+                        0).unsqueeze(-1)) \
+                                                                                     / freqwise_std[:, 2].unsqueeze(
+                0).unsqueeze(-1)
+
+            input_new = torch.zeros_like(input_DCT_freqnorm).cuda()
             for i in range(3 * self.num_segments):
                 if i < self.num_segments:
-                    input_DCT_reshape[:, i * 3, :] = input_DCT[:, i, :]
+                    input_new[:, 3 * i, :] = input_DCT_freqnorm[:, i, :]
                 elif i < 2 * self.num_segments:
-                    input_DCT_reshape[:, (i - self.num_segments) * 3 + 1, :] = input_DCT[:, i, :]
+                    input_new[:, 3 * (i - self.num_segments) + 1, :] = input_DCT_freqnorm[:, i, :]
                 else:
-                    input_DCT_reshape[:, (i - 2 * self.num_segments) * 3 + 2, :] = input_DCT[:, i, :]
-            input_DCT_reshape = input_DCT_reshape.reshape(batch_size, self.num_segments, 3, -1)
+                    input_new[:, 3 * (i - 2 * self.num_segments) + 2, :] = input_DCT_freqnorm[:, i, :]
+            input_DCT_norm = input_new[:, 1:, :, :]
 
-            # TODO: Frequency-wise normalization
-            freq_mean = input_DCT_reshape.mean(dim=(2, 3)).unsqueeze(-1).unsqueeze(-1)
-            freq_std = input_DCT_reshape.std(dim=(2, 3)).unsqueeze(-1).unsqueeze(-1)
-            input_DCT_reshape_norm = (input_DCT_reshape - freq_mean) / freq_std
-            input_DCT_norm = input_DCT_reshape_norm[:, 1:, :, :]
+
+            # # TODO: RRR...GGG...BBB... -> RGBRGBRGB...
+            # input_DCT_reshape = torch.zeros_like(input_DCT).cuda()
+            # for i in range(3 * self.num_segments):
+            #     if i < self.num_segments:
+            #         input_DCT_reshape[:, i * 3, :] = input_DCT[:, i, :]
+            #     elif i < 2 * self.num_segments:
+            #         input_DCT_reshape[:, (i - self.num_segments) * 3 + 1, :] = input_DCT[:, i, :]
+            #     else:
+            #         input_DCT_reshape[:, (i - 2 * self.num_segments) * 3 + 2, :] = input_DCT[:, i, :]
+            # input_DCT_reshape = input_DCT_reshape.reshape(batch_size, self.num_segments, 3, -1)
+            #
+            # # TODO: Frequency-wise normalization
+            # freq_mean = input_DCT_reshape.mean(dim=(2, 3)).unsqueeze(-1).unsqueeze(-1)
+            # freq_std = input_DCT_reshape.std(dim=(2, 3)).unsqueeze(-1).unsqueeze(-1)
+            # input_DCT_reshape_norm = (input_DCT_reshape - freq_mean) / freq_std
+            # input_DCT_norm = input_DCT_reshape_norm[:, 1:, :, :]
+
             input_DCT_norm = input_DCT_norm.reshape(batch_size, (self.num_segments - 1) * 3, height, width)
 
             ######## Time domain stream ########
