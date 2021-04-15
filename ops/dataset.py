@@ -29,12 +29,12 @@ class VideoRecord(object):
 
 
 class TSNDataSet(data.Dataset):
-    def __init__(self, root_path, list_file,
+    def __init__(self, dataset, root_path, list_file,
                  num_segments=3, new_length=1, modality='RGB',
                  image_tmpl='img_{:05d}.jpg', transform=None,
                  random_shift=True, test_mode=False,
                  remove_missing=False, dense_sample=False, twice_sample=False):
-
+        self.dataset = dataset
         self.root_path = root_path
         self.list_file = list_file
         self.num_segments = num_segments
@@ -52,48 +52,21 @@ class TSNDataSet(data.Dataset):
         if self.twice_sample:
             print('=> Using twice sample for the dataset...')
 
-        if self.modality == 'RGBDiff':
-            self.new_length += 1  # Diff needs one more image to calculate diff
-
         self._parse_list()
 
     def _load_image(self, directory, idx):
-        if self.modality == 'RGB' or self.modality == 'RGBDiff':
-            try:
-                return [Image.open(os.path.join(self.root_path, directory, self.image_tmpl.format(idx))).convert('RGB')]
-            except Exception:
-                print('error loading image:', os.path.join(self.root_path, directory, self.image_tmpl.format(idx)))
-                return [Image.open(os.path.join(self.root_path, directory, self.image_tmpl.format(1))).convert('RGB')]
-        elif self.modality == 'Flow':
-            if self.image_tmpl == 'flow_{}_{:05d}.jpg':  # ucf
-                x_img = Image.open(os.path.join(self.root_path, directory, self.image_tmpl.format('x', idx))).convert(
-                    'L')
-                y_img = Image.open(os.path.join(self.root_path, directory, self.image_tmpl.format('y', idx))).convert(
-                    'L')
-            elif self.image_tmpl == '{:06d}-{}_{:05d}.jpg':  # something v1 flow
-                x_img = Image.open(os.path.join(self.root_path, '{:06d}'.format(int(directory)), self.image_tmpl.
-                                                format(int(directory), 'x', idx))).convert('L')
-                y_img = Image.open(os.path.join(self.root_path, '{:06d}'.format(int(directory)), self.image_tmpl.
-                                                format(int(directory), 'y', idx))).convert('L')
-            else:
-                try:
-                    # idx_skip = 1 + (idx-1)*5
-                    flow = Image.open(os.path.join(self.root_path, directory, self.image_tmpl.format(idx))).convert(
-                        'RGB')
-                except Exception:
-                    print('error loading flow file:',
-                          os.path.join(self.root_path, directory, self.image_tmpl.format(idx)))
-                    flow = Image.open(os.path.join(self.root_path, directory, self.image_tmpl.format(1))).convert('RGB')
-                # the input flow file is RGB image with (flow_x, flow_y, blank) for each channel
-                flow_x, flow_y, _ = flow.split()
-                x_img = flow_x.convert('L')
-                y_img = flow_y.convert('L')
-
-            return [x_img, y_img]
+        try:
+            return [Image.open(os.path.join(self.root_path, directory, self.image_tmpl.format(idx))).convert('RGB')]
+        except Exception:
+            print('error loading image:', os.path.join(self.root_path, directory, self.image_tmpl.format(idx)))
+            return [Image.open(os.path.join(self.root_path, directory, self.image_tmpl.format(1))).convert('RGB')]
 
     def _parse_list(self):
         # check the frame number is large >3:
-        tmp = [x.strip().split(' ') for x in open(self.list_file)]
+        if self.dataset == 'minikinetics':
+            tmp = [x.strip().split(',') for x in open(self.list_file)]
+        else:
+            tmp = [x.strip().split(' ') for x in open(self.list_file)]
         if not self.test_mode or self.remove_missing:
             tmp = [item for item in tmp if int(item[1]) >= 3]
         self.video_list = [VideoRecord(item) for item in tmp]
@@ -177,7 +150,7 @@ class TSNDataSet(data.Dataset):
             full_path = os.path.join(self.root_path, record.path, file_name)
 
         while not os.path.exists(full_path):
-            print('################## Not Found:', os.path.join(self.root_path, record.path, file_name))
+            # print('################## Not Found:', os.path.join(self.root_path, record.path, file_name))
             index = np.random.randint(len(self.video_list))
             record = self.video_list[index]
             if self.image_tmpl == 'flow_{}_{:05d}.jpg':

@@ -1,5 +1,5 @@
 import numpy as np
-
+from math import pi
 
 def softmax(scores):
     es = np.exp(scores - scores.max(axis=-1)[..., None])
@@ -39,3 +39,24 @@ def accuracy(output, target, topk=(1,)):
         correct_k = correct[:k].view(-1).float().sum(0)
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
+
+def DCTmatrix(length):
+    C = np.zeros((length, length))
+    for i in range(length):
+        for j in range(length):
+            if j == 0:
+                C[j, i] = np.sqrt(1 / length)
+            else:
+                C[j, i] = np.sqrt(2 / length) * np.cos((2 * i + 1) * j * pi / (2 * length))
+    return C
+
+def DCTmatrix_hat(C, length):
+    C_hat = np.zeros((3 * length, 3 * length))
+    for i in range(3 * length):
+        if i < length:
+            C_hat[i, :length] = C[i, :]
+        elif i < 2 * length:
+            C_hat[i, length: 2 * length] = C[i - length, :]
+        else:
+            C_hat[i, 2 * length: 3 * length] = C[i - (2 * length), :]
+    return C_hat

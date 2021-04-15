@@ -17,7 +17,6 @@ from ops.transforms import *
 from opts import parser
 from ops import dataset_config
 from ops.utils import AverageMeter, accuracy
-from ops.temporal_shift import make_temporal_pool
 
 from tensorboardX import SummaryWriter
 
@@ -31,21 +30,15 @@ def main():
     num_class, args.train_list, args.val_list, args.root_path, prefix = dataset_config.return_dataset(args.dataset,
                                                                                                       args.modality)
     full_arch_name = args.arch
-    if args.shift:
-        full_arch_name += '_shift{}_{}'.format(args.shift_div, args.shift_place)
-    if args.temporal_pool:
-        full_arch_name += '_tpool'
+    if args.two_stream:
+        full_arch_name += '_2stream'
     args.store_name = '_'.join(
-        ['TSM', args.dataset, args.modality, full_arch_name, args.consensus_type, 'segment%d' % args.num_segments,
+        ['TSN', args.dataset, args.modality, full_arch_name, args.consensus_type, 'segment%d' % args.num_segments,
          'e{}'.format(args.epochs)])
     if args.pretrain != 'imagenet':
         args.store_name += '_{}'.format(args.pretrain)
-    if args.lr_type != 'step':
-        args.store_name += '_{}'.format(args.lr_type)
     if args.dense_sample:
         args.store_name += '_dense'
-    if args.non_local > 0:
-        args.store_name += '_nl'
     if args.suffix is not None:
         args.store_name += '_{}'.format(args.suffix)
     print('storing name: ' + args.store_name)
@@ -59,28 +52,29 @@ def main():
                 img_feature_dim=args.img_feature_dim,
                 partial_bn=not args.no_partialbn,
                 pretrain=args.pretrain,
-                is_shift=args.shift, shift_div=args.shift_div, shift_place=args.shift_place,
                 fc_lr5=not (args.tune_from and args.dataset in args.tune_from),
-                temporal_pool=args.temporal_pool,
-                non_local=args.non_local)
+                two_stream=args.two_stream)
 
     crop_size = model.crop_size
     scale_size = model.scale_size
     input_mean = model.input_mean
     input_std = model.input_std
-    policies = model.get_optim_policies()
-    train_augmentation = model.get_augmentation(flip=False if 'something' in args.dataset or 'jester' in args.dataset else True)
+    train_augmentation = model.get_augmentation(flip=False if 'something' in args.dataset else True)
 
     model = torch.nn.DataParallel(model, device_ids=args.gpus).cuda()
 
-    optimizer = torch.optim.SGD(policies,
-                                args.lr,
-                                momentum=args.momentum,
-                                weight_decay=args.weight_decay)
+    if args.two_stream:
+        optimizer = torch.optim.SGD([{'params': model.module.base_model.parameters(), 'lr': args.lr * 0.01},
+                                     {'params': model.module.new_fc.parameters(), 'lr': args.lr * 0.01 * 10},
+                                     {'params': model.module.freq_model.parameters()},
+                                     {'params': model.module.freq_new_fc.parameters()}],
+                                    lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    else:
+        optimizer = torch.optim.SGD([{'params': model.module.base_model.parameters()},
+                                     {'params': model.module.new_fc.parameters(), 'lr': args.lr * 10}],
+                                    lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
     if args.resume:
-        if args.temporal_pool:  # early temporal pool so that we can load the state_dict
-            make_temporal_pool(model.module.base_model, args.num_segments)
         if os.path.isfile(args.resume):
             print(("=> loading checkpoint '{}'".format(args.resume)))
             checkpoint = torch.load(args.resume)
@@ -88,8 +82,7 @@ def main():
             best_prec1 = checkpoint['best_prec1']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-            print(("=> loaded checkpoint '{}' (epoch {})"
-                   .format(args.evaluate, checkpoint['epoch'])))
+            print(("=> loaded checkpoint '{}' (epoch {})".format(args.evaluate, checkpoint['epoch'])))
         else:
             print(("=> no checkpoint found at '{}'".format(args.resume)))
 
@@ -122,52 +115,75 @@ def main():
         model_dict.update(sd)
         model.load_state_dict(model_dict)
 
-    if args.temporal_pool and not args.resume:
-        make_temporal_pool(model.module.base_model, args.num_segments)
-
     cudnn.benchmark = True
 
     # Data loading code
-    if args.modality != 'RGBDiff':
-        normalize = GroupNormalize(input_mean, input_std)
+    normalize = GroupNormalize(input_mean, input_std, args.two_stream)
+
+    data_length = 1
+
+    if args.dataset == 'minikinetics':
+        train_loader = torch.utils.data.DataLoader(
+            TSNDataSet(args.dataset, args.root_path + '/train/', args.train_list, num_segments=args.num_segments,
+                       new_length=data_length,
+                       modality=args.modality,
+                       image_tmpl=prefix,
+                       transform=torchvision.transforms.Compose([
+                           train_augmentation,
+                           Stack(roll=False),
+                           ToTorchFormatTensor(div=False if args.two_stream else True),
+                           normalize,
+                       ]), dense_sample=args.dense_sample),
+            batch_size=args.batch_size, shuffle=True,
+            num_workers=args.workers, pin_memory=True,
+            drop_last=True)  # prevent something not % n_GPU
+
+        val_loader = torch.utils.data.DataLoader(
+            TSNDataSet(args.dataset, args.root_path + '/val/', args.val_list, num_segments=args.num_segments,
+                       new_length=data_length,
+                       modality=args.modality,
+                       image_tmpl=prefix,
+                       random_shift=False,
+                       transform=torchvision.transforms.Compose([
+                           GroupScale(int(scale_size)),
+                           GroupCenterCrop(crop_size),
+                           Stack(roll=False),
+                           ToTorchFormatTensor(div=False if args.two_stream else True),
+                           normalize,
+                       ]), dense_sample=args.dense_sample),
+            batch_size=args.batch_size, shuffle=False,
+            num_workers=args.workers, pin_memory=True)
     else:
-        normalize = IdentityTransform()
+        train_loader = torch.utils.data.DataLoader(
+            TSNDataSet(args.dataset, args.root_path, args.train_list, num_segments=args.num_segments,
+                       new_length=data_length,
+                       modality=args.modality,
+                       image_tmpl=prefix,
+                       transform=torchvision.transforms.Compose([
+                           train_augmentation,
+                           Stack(roll=False),
+                           ToTorchFormatTensor(div=False if args.two_stream else True),
+                           normalize,
+                       ]), dense_sample=args.dense_sample),
+            batch_size=args.batch_size, shuffle=True,
+            num_workers=args.workers, pin_memory=True,
+            drop_last=True)  # prevent something not % n_GPU
 
-    if args.modality == 'RGB':
-        data_length = 1
-    elif args.modality in ['Flow', 'RGBDiff']:
-        data_length = 5
-
-    train_loader = torch.utils.data.DataLoader(
-        TSNDataSet(args.root_path, args.train_list, num_segments=args.num_segments,
-                   new_length=data_length,
-                   modality=args.modality,
-                   image_tmpl=prefix,
-                   transform=torchvision.transforms.Compose([
-                       train_augmentation,
-                       Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
-                       ToTorchFormatTensor(div=(args.arch not in ['BNInception', 'InceptionV3'])),
-                       normalize,
-                   ]), dense_sample=args.dense_sample),
-        batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=True,
-        drop_last=True)  # prevent something not % n_GPU
-
-    val_loader = torch.utils.data.DataLoader(
-        TSNDataSet(args.root_path, args.val_list, num_segments=args.num_segments,
-                   new_length=data_length,
-                   modality=args.modality,
-                   image_tmpl=prefix,
-                   random_shift=False,
-                   transform=torchvision.transforms.Compose([
-                       GroupScale(int(scale_size)),
-                       GroupCenterCrop(crop_size),
-                       Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
-                       ToTorchFormatTensor(div=(args.arch not in ['BNInception', 'InceptionV3'])),
-                       normalize,
-                   ]), dense_sample=args.dense_sample),
-        batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+        val_loader = torch.utils.data.DataLoader(
+            TSNDataSet(args.dataset, args.root_path, args.val_list, num_segments=args.num_segments,
+                       new_length=data_length,
+                       modality=args.modality,
+                       image_tmpl=prefix,
+                       random_shift=False,
+                       transform=torchvision.transforms.Compose([
+                           GroupScale(int(scale_size)),
+                           GroupCenterCrop(crop_size),
+                           Stack(roll=False),
+                           ToTorchFormatTensor(div=False if args.two_stream else True),
+                           normalize,
+                       ]), dense_sample=args.dense_sample),
+            batch_size=args.batch_size, shuffle=False,
+            num_workers=args.workers, pin_memory=True)
 
     # define loss function (criterion) and optimizer
     if args.loss_type == 'nll':
@@ -175,20 +191,17 @@ def main():
     else:
         raise ValueError("Unknown loss type")
 
-    for group in policies:
-        print(('group: {} has {} params, lr_mult: {}, decay_mult: {}'.format(
-            group['name'], len(group['params']), group['lr_mult'], group['decay_mult'])))
-
     if args.evaluate:
-        validate(val_loader, model, criterion, 0)
+        validate(val_loader, model, criterion, None)
         return
 
     log_training = open(os.path.join(args.root_log, args.store_name, 'log.csv'), 'w')
     with open(os.path.join(args.root_log, args.store_name, 'args.txt'), 'w') as f:
         f.write(str(args))
     tf_writer = SummaryWriter(log_dir=os.path.join(args.root_log, args.store_name))
+
     for epoch in range(args.start_epoch, args.epochs):
-        adjust_learning_rate(optimizer, epoch, args.lr_type, args.lr_steps)
+        adjust_learning_rate(optimizer, epoch, args.warm_up_epoch, args.lr_steps, args.two_stream)
 
         # train for one epoch
         train(train_loader, model, criterion, optimizer, epoch, log_training, tf_writer)
@@ -241,7 +254,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
         target_var = torch.autograd.Variable(target)
 
         # compute output
-        output = model(input_var)
+        output = model(input_var, epoch, args.warm_up_epoch)
         loss = criterion(output, target_var)
 
         # measure accuracy and record loss
@@ -271,7 +284,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
                       'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                       'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                 epoch, i, len(train_loader), batch_time=batch_time,
-                data_time=data_time, loss=losses, top1=top1, top5=top5, lr=optimizer.param_groups[-1]['lr'] * 0.1))  # TODO
+                data_time=data_time, loss=losses, top1=top1, top5=top5, lr=optimizer.param_groups[-2]['lr']))  # TODO
             print(output)
             log.write(output + '\n')
             log.flush()
@@ -346,21 +359,25 @@ def save_checkpoint(state, is_best):
         shutil.copyfile(filename, filename.replace('pth.tar', 'best.pth.tar'))
 
 
-def adjust_learning_rate(optimizer, epoch, lr_type, lr_steps):
-    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    if lr_type == 'step':
-        decay = 0.1 ** (sum(epoch >= np.array(lr_steps)))
-        lr = args.lr * decay
-        decay = args.weight_decay
-    elif lr_type == 'cos':
+def adjust_learning_rate(optimizer, epoch, warm_up_epoch, lr_steps, two_stream):
+    if two_stream:
+        decay = 0.1 ** (sum(epoch >= np.array([x + warm_up_epoch for x in lr_steps])))
+        lr_time = args.lr * 0.01 * decay
+
         import math
-        lr = 0.5 * args.lr * (1 + math.cos(math.pi * epoch / args.epochs))
-        decay = args.weight_decay
+        if epoch < warm_up_epoch:
+            lr_freq = 0.5 * args.lr * (1 + math.cos(math.pi * epoch / args.epochs))
+        else:
+            lr_freq = args.lr * 0.01 * decay
     else:
-        raise NotImplementedError
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr * param_group['lr_mult']
-        param_group['weight_decay'] = decay * param_group['decay_mult']
+        decay = 0.1 ** (sum(epoch >= np.array(lr_steps)))
+        lr_time = args.lr * decay
+
+    optimizer.param_groups[0]['lr'] = lr_time
+    optimizer.param_groups[1]['lr'] = lr_time * 10
+    if two_stream:
+        optimizer.param_groups[2]['lr'] = lr_freq
+        optimizer.param_groups[3]['lr'] = lr_freq
 
 
 def check_rootfolders():

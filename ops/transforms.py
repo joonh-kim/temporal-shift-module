@@ -61,19 +61,23 @@ class GroupRandomHorizontalFlip(object):
 
 
 class GroupNormalize(object):
-    def __init__(self, mean, std):
+    def __init__(self, mean, std, two_stream):
         self.mean = mean
         self.std = std
+        self.two_stream = two_stream
 
     def __call__(self, tensor):
-        rep_mean = self.mean * (tensor.size()[0]//len(self.mean))
-        rep_std = self.std * (tensor.size()[0]//len(self.std))
+        if self.two_stream:
+            return tensor
+        else:
+            rep_mean = self.mean * (tensor.size()[0]//len(self.mean))
+            rep_std = self.std * (tensor.size()[0]//len(self.std))
 
-        # TODO: make efficient
-        for t, m, s in zip(tensor, rep_mean, rep_std):
-            t.sub_(m).div_(s)
+            # TODO: make efficient
+            for t, m, s in zip(tensor, rep_mean, rep_std):
+                t.sub_(m).div_(s)
 
-        return tensor
+            return tensor
 
 
 class GroupScale(object):
