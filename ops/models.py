@@ -63,7 +63,7 @@ class TSN(nn.Module):
             self._prepare_freq_model(base_model)
             feature_dim = self._prepare_freq_tsn(num_class)
             self.feature_dim = feature_dim
-            self.rnn = nn.LSTMCell(input_size=feature_dim, hidden_size=feature_dim, bias=True)
+            # self.rnn = nn.LSTMCell(input_size=feature_dim, hidden_size=feature_dim, bias=True)
 
             self.DCT = DCTmatrix(num_segments)
             self.DCT_hat = DCTmatrix_hat(self.DCT, num_segments)
@@ -270,14 +270,18 @@ class TSN(nn.Module):
             ######## forward ########
             freq_out = self.freq_model(input_DCT_norm.reshape(batch_size * (self.num_segments - 1), 3, height, width))
 
-            hx = init_hidden(batch_size, self.feature_dim)
-            cx = init_hidden(batch_size, self.feature_dim)
-            for t in range(self.num_segments - 1):
-                hx, cx = self.rnn(freq_out[:, t], (hx, cx))
-            freq_out = hx
+            # freq_out = freq_out.reshape(batch_size, self.num_segments - 1, -1)
+            # hx = init_hidden(batch_size, self.feature_dim)
+            # cx = init_hidden(batch_size, self.feature_dim)
+            # for t in range(self.num_segments - 1):
+            #     hx, cx = self.rnn(freq_out[:, t], (hx, cx))
+            # freq_out = hx
 
             if self.dropout > 0:
                 freq_out = self.freq_new_fc(freq_out)
+
+            freq_out = freq_out.reshape(batch_size, self.num_segments - 1, -1)
+            freq_out = self.consensus(freq_out)
 
             if epoch == None or epoch >= warm_up_epoch:
                 base_out = self.base_model(input_norm.view((-1, 3) + input_norm.size()[-2:]))
@@ -285,9 +289,9 @@ class TSN(nn.Module):
                     base_out = self.new_fc(base_out)
                 base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])
                 output = self.consensus(base_out)
-                return output.squeeze().softmax(dim=1) + freq_out.softmax(dim=1)
+                return output.squeeze().softmax(dim=1) + freq_out.squeeze().softmax(dim=1)
             else:
-                return freq_out
+                return freq_out.squeeze()
 
         else:
             base_out = self.base_model(input.view((-1, 3) + input.size()[-2:]))

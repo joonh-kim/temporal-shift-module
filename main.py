@@ -67,8 +67,8 @@ def main():
         optimizer = torch.optim.SGD([{'params': model.module.base_model.parameters(), 'lr': args.lr * 0.01},
                                      {'params': model.module.new_fc.parameters(), 'lr': args.lr * 0.01 * 10},
                                      {'params': model.module.freq_model.parameters()},
-                                     {'params': model.module.freq_new_fc.parameters()},
-                                     {'params': model.module.rnn.parameters()}],
+                                     {'params': model.module.freq_new_fc.parameters()}],
+                                     # {'params': model.module.rnn.parameters()}],
                                     lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     else:
         optimizer = torch.optim.SGD([{'params': model.module.base_model.parameters()},
@@ -379,7 +379,7 @@ def adjust_learning_rate(optimizer, epoch, warm_up_epoch, lr_steps, two_stream):
     if two_stream:
         optimizer.param_groups[2]['lr'] = lr_freq
         optimizer.param_groups[3]['lr'] = lr_freq
-        optimizer.param_groups[4]['lr'] = lr_freq
+        # optimizer.param_groups[4]['lr'] = lr_freq
 
 
 def check_rootfolders():
