@@ -64,11 +64,12 @@ def main():
     model = torch.nn.DataParallel(model, device_ids=args.gpus).cuda()
 
     if args.two_stream:
-        optimizer = torch.optim.SGD([{'params': model.module.base_model.parameters(), 'lr': args.lr * 0.01},
-                                     {'params': model.module.new_fc.parameters(), 'lr': args.lr * 0.01 * 10},
-                                     {'params': model.module.freq_model.parameters()},
-                                     {'params': model.module.freq_new_fc.parameters()}],
-                                     # {'params': model.module.rnn.parameters()}],
+        # optimizer = torch.optim.SGD([{'params': model.module.freq_model.parameters()},
+        #                              {'params': model.module.freq_new_fc.parameters()},
+        #                              {'params': model.module.base_model.parameters(), 'lr': args.lr * 0.01},
+        #                              {'params': model.module.new_fc.parameters(), 'lr': args.lr * 0.01 * 10}],
+        #                             lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+        optimizer = torch.optim.SGD(model.module.parameters(),
                                     lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     else:
         optimizer = torch.optim.SGD([{'params': model.module.base_model.parameters()},
@@ -189,11 +190,12 @@ def main():
     # define loss function (criterion) and optimizer
     if args.loss_type == 'nll':
         criterion = torch.nn.CrossEntropyLoss().cuda()
+        criterion_wo_softmax = torch.nn.NLLLoss().cuda()
     else:
         raise ValueError("Unknown loss type")
 
     if args.evaluate:
-        validate(val_loader, model, criterion, None)
+        validate(val_loader, model, criterion, criterion_wo_softmax, None)
         return
 
     log_training = open(os.path.join(args.root_log, args.store_name, 'log.csv'), 'w')
@@ -205,11 +207,11 @@ def main():
         adjust_learning_rate(optimizer, epoch, args.warm_up_epoch, args.lr_steps, args.two_stream)
 
         # train for one epoch
-        train(train_loader, model, criterion, optimizer, epoch, log_training, tf_writer)
+        train(train_loader, model, criterion, criterion_wo_softmax, optimizer, epoch, log_training, tf_writer)
 
         # evaluate on validation set
         if (epoch + 1) % args.eval_freq == 0 or epoch == args.epochs - 1:
-            prec1 = validate(val_loader, model, criterion, epoch, log_training, tf_writer)
+            prec1 = validate(val_loader, model, criterion, criterion_wo_softmax, epoch, log_training, tf_writer)
 
             # remember best prec@1 and save checkpoint
             is_best = prec1 > best_prec1
@@ -230,7 +232,7 @@ def main():
             }, is_best)
 
 
-def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
+def train(train_loader, model, criterion, criterion_wo_softmax, optimizer, epoch, log, tf_writer):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -256,7 +258,10 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
 
         # compute output
         output = model(input_var, epoch, args.warm_up_epoch)
-        loss = criterion(output, target_var)
+        if args.two_stream:
+            loss = criterion_wo_softmax(torch.log(output), target_var)
+        else:
+            loss = criterion(output, target_var)
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
@@ -285,7 +290,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
                       'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                       'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                 epoch, i, len(train_loader), batch_time=batch_time,
-                data_time=data_time, loss=losses, top1=top1, top5=top5, lr=optimizer.param_groups[-2]['lr']))  # TODO
+                data_time=data_time, loss=losses, top1=top1, top5=top5, lr=optimizer.param_groups[0]['lr']))  # TODO
             print(output)
             log.write(output + '\n')
             log.flush()
@@ -296,7 +301,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
     tf_writer.add_scalar('lr', optimizer.param_groups[-1]['lr'], epoch)
 
 
-def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
+def validate(val_loader, model, criterion, criterion_wo_softmax, epoch, log=None, tf_writer=None):
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
@@ -312,7 +317,10 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
 
             # compute output
             output = model(input)
-            loss = criterion(output, target)
+            if args.two_stream:
+                loss = criterion_wo_softmax(torch.log(output), target)
+            else:
+                loss = criterion(output, target)
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
@@ -338,8 +346,8 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
                     log.write(output + '\n')
                     log.flush()
 
-    output = ('Testing Results: Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} Loss {loss.avg:.5f}'
-              .format(top1=top1, top5=top5, loss=losses))
+    output = ('Testing Results: Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} Loss {loss.avg:.5f} Time {time:.3f}'
+              .format(top1=top1, top5=top5, loss=losses, time=batch_time.avg * len(val_loader)))
     print(output)
     if log is not None:
         log.write(output + '\n')
@@ -362,24 +370,30 @@ def save_checkpoint(state, is_best):
 
 def adjust_learning_rate(optimizer, epoch, warm_up_epoch, lr_steps, two_stream):
     if two_stream:
-        decay = 0.1 ** (sum(epoch >= np.array([x + warm_up_epoch for x in lr_steps])))
-        lr_time = args.lr * 0.01 * decay
+        # decay = 0.1 ** (sum(epoch >= np.array([x + warm_up_epoch for x in lr_steps])))
+        # lr_time = args.lr * 0.01 * decay
+        #
+        # import math
+        # if epoch < warm_up_epoch:
+        #     lr_freq = 0.5 * args.lr * (1 + math.cos(math.pi * epoch / args.epochs))
+        # else:
+        #     lr_freq = args.lr * 0.01 * decay
+
+        # optimizer.param_groups[0]['lr'] = lr_time
+        # optimizer.param_groups[1]['lr'] = lr_time * 10
+        # optimizer.param_groups[2]['lr'] = lr_freq
+        # optimizer.param_groups[3]['lr'] = lr_freq
 
         import math
-        if epoch < warm_up_epoch:
-            lr_freq = 0.5 * args.lr * (1 + math.cos(math.pi * epoch / args.epochs))
-        else:
-            lr_freq = args.lr * 0.01 * decay
+        lr = 0.5 * args.lr * (1 + math.cos(math.pi * epoch / args.epochs))
+        optimizer.param_groups[0]['lr'] = lr
+
     else:
         decay = 0.1 ** (sum(epoch >= np.array(lr_steps)))
         lr_time = args.lr * decay
 
-    optimizer.param_groups[0]['lr'] = lr_time
-    optimizer.param_groups[1]['lr'] = lr_time * 10
-    if two_stream:
-        optimizer.param_groups[2]['lr'] = lr_freq
-        optimizer.param_groups[3]['lr'] = lr_freq
-        # optimizer.param_groups[4]['lr'] = lr_freq
+        optimizer.param_groups[0]['lr'] = lr_time
+        optimizer.param_groups[1]['lr'] = lr_time * 10
 
 
 def check_rootfolders():

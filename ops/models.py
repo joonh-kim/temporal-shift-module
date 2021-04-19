@@ -61,9 +61,7 @@ class TSN(nn.Module):
 
         if self.two_stream:
             self._prepare_freq_model(base_model)
-            feature_dim = self._prepare_freq_tsn(num_class)
-            self.feature_dim = feature_dim
-            # self.rnn = nn.LSTMCell(input_size=feature_dim, hidden_size=feature_dim, bias=True)
+            self._prepare_freq_tsn(num_class)
 
             self.DCT = DCTmatrix(num_segments)
             self.DCT_hat = DCTmatrix_hat(self.DCT, num_segments)
@@ -112,7 +110,6 @@ class TSN(nn.Module):
             if hasattr(self.freq_new_fc, 'weight'):
                 normal_(self.freq_new_fc.weight, 0, std)
                 constant_(self.freq_new_fc.bias, 0)
-        return feature_dim
 
     def _prepare_base_model(self, base_model):
         print('=> base model: {}'.format(base_model))
@@ -163,6 +160,7 @@ class TSN(nn.Module):
             height = input.shape[2]
             width = input.shape[3]
 
+            # minikinetics
             freqwise_mean = torch.tensor([[3.11999440e+02, 2.92734101e+02, 2.73512572e+02],
                                           [1.31976900e-01, 4.65869393e-03, 1.07130773e-01],
                                           [-7.42678419e-01, -8.82907354e-01, -8.00437933e-01],
@@ -179,6 +177,24 @@ class TSN(nn.Module):
                                          [7.61678615, 7.42603237, 7.62194055],
                                          [6.39031728, 6.23412457, 6.36752511],
                                          [5.77056411, 5.65715373, 5.81123869]]).cuda()
+
+            # somethingv2
+            # freqwise_mean = torch.tensor([[3.39679380e+02, 3.11332070e+02, 2.91804584e+02],
+            #                               [1.14269173e+00, 1.00906878e+00, 7.75543490e-01],
+            #                               [1.25870654e+00, 2.40422867e+00, 2.64837731e+00],
+            #                               [5.98750330e-01, 7.14237337e-01, 6.52234057e-01],
+            #                               [2.58246911e-01, 5.14654996e-01, 5.46017073e-01],
+            #                               [1.01753115e-01, 1.61826005e-01, 1.31615562e-01],
+            #                               [2.76338649e-02, 1.13862982e-01, 9.89421514e-02],
+            #                               [-6.85346599e-03, 1.49679967e-02, 1.11790851e-02]]).cuda()
+            # freqwise_std = torch.tensor([[100.81675686, 94.3826637, 96.1053402],
+            #                              [19.46331317, 19.32941076, 20.23192787],
+            #                              [12.79817142, 12.89036199, 13.42268755],
+            #                              [8.98159843, 9.06062315, 9.40278515],
+            #                              [6.69077387, 6.78101926, 7.00193444],
+            #                              [5.16934646, 5.2024311, 5.34479011],
+            #                              [4.23246954, 4.2268805, 4.31114941],
+            #                              [3.77383492, 3.76747485, 3.83444023]]).cuda()
 
             # TODO: RGBRGBRGB... -> RRR...GGG...BBB...
             r_indices = (torch.arange(self.num_segments) * 3).cuda()
@@ -200,19 +216,13 @@ class TSN(nn.Module):
                                                              - freqwise_mean[:, 0].unsqueeze(0).unsqueeze(-1)) \
                                                             / freqwise_std[:, 0].unsqueeze(0).unsqueeze(-1)
             input_DCT_freqnorm[:, self.num_segments: 2 * self.num_segments, :] = (input_DCT[:,
-                                                                                  self.num_segments: 2 * self.num_segments,
-                                                                                  :]
-                                                                                  - freqwise_mean[:, 1].unsqueeze(
-                        0).unsqueeze(-1)) \
-                                                                                 / freqwise_std[:, 1].unsqueeze(
-                0).unsqueeze(-1)
+                                                                                  self.num_segments: 2 * self.num_segments, :]
+                                                                                  - freqwise_mean[:, 1].unsqueeze(0).unsqueeze(-1)) \
+                                                                                 / freqwise_std[:, 1].unsqueeze(0).unsqueeze(-1)
             input_DCT_freqnorm[:, 2 * self.num_segments: 3 * self.num_segments, :] = (input_DCT[:,
-                                                                                      2 * self.num_segments: 3 * self.num_segments,
-                                                                                      :]
-                                                                                      - freqwise_mean[:, 2].unsqueeze(
-                        0).unsqueeze(-1)) \
-                                                                                     / freqwise_std[:, 2].unsqueeze(
-                0).unsqueeze(-1)
+                                                                                      2 * self.num_segments: 3 * self.num_segments, :]
+                                                                                      - freqwise_mean[:, 2].unsqueeze(0).unsqueeze(-1)) \
+                                                                                     / freqwise_std[:, 2].unsqueeze(0).unsqueeze(-1)
 
             # TODO: RRR...GGG...BBB... -> RGBRGBRGB...
             input_new = torch.zeros_like(input_DCT_freqnorm).cuda()
@@ -223,8 +233,6 @@ class TSN(nn.Module):
                     input_new[:, 3 * (i - self.num_segments) + 1, :] = input_DCT_freqnorm[:, i, :]
                 else:
                     input_new[:, 3 * (i - 2 * self.num_segments) + 2, :] = input_DCT_freqnorm[:, i, :]
-            input_new = input_new.reshape(batch_size, self.num_segments, 3, -1)
-            input_DCT_norm = input_new[:, 1:, :, :]
 
             # input_new = torch.zeros_like(input_DCT).cuda()
             # for i in range(3 * self.num_segments):
@@ -234,28 +242,6 @@ class TSN(nn.Module):
             #         input_new[:, 3 * (i - self.num_segments) + 1, :] = input_DCT[:, i, :]
             #     else:
             #         input_new[:, 3 * (i - 2 * self.num_segments) + 2, :] = input_DCT[:, i, :]
-            # input_new = input_new.reshape(batch_size, self.num_segments, 3, -1)
-            # input_DCT_norm = input_new[:, 1:, :, :]
-
-
-            # # TODO: RRR...GGG...BBB... -> RGBRGBRGB...
-            # input_DCT_reshape = torch.zeros_like(input_DCT).cuda()
-            # for i in range(3 * self.num_segments):
-            #     if i < self.num_segments:
-            #         input_DCT_reshape[:, i * 3, :] = input_DCT[:, i, :]
-            #     elif i < 2 * self.num_segments:
-            #         input_DCT_reshape[:, (i - self.num_segments) * 3 + 1, :] = input_DCT[:, i, :]
-            #     else:
-            #         input_DCT_reshape[:, (i - 2 * self.num_segments) * 3 + 2, :] = input_DCT[:, i, :]
-            # input_DCT_reshape = input_DCT_reshape.reshape(batch_size, self.num_segments, 3, -1)
-            #
-            # # TODO: Frequency-wise normalization
-            # freq_mean = input_DCT_reshape.mean(dim=(2, 3)).unsqueeze(-1).unsqueeze(-1)
-            # freq_std = input_DCT_reshape.std(dim=(2, 3)).unsqueeze(-1).unsqueeze(-1)
-            # input_DCT_reshape_norm = (input_DCT_reshape - freq_mean) / freq_std
-            # input_DCT_norm = input_DCT_reshape_norm[:, 1:, :, :]
-
-            input_DCT_norm = input_DCT_norm.reshape(batch_size, (self.num_segments - 1) * 3, height, width)
 
             ######## Time domain stream ########
             if epoch == None or epoch >= warm_up_epoch:
@@ -268,19 +254,12 @@ class TSN(nn.Module):
                         j.sub_(m).div_(s)
 
             ######## forward ########
-            freq_out = self.freq_model(input_DCT_norm.reshape(batch_size * (self.num_segments - 1), 3, height, width))
-
-            # freq_out = freq_out.reshape(batch_size, self.num_segments - 1, -1)
-            # hx = init_hidden(batch_size, self.feature_dim)
-            # cx = init_hidden(batch_size, self.feature_dim)
-            # for t in range(self.num_segments - 1):
-            #     hx, cx = self.rnn(freq_out[:, t], (hx, cx))
-            # freq_out = hx
+            freq_out = self.freq_model(input_new.reshape(batch_size * self.num_segments, 3, height, width))
 
             if self.dropout > 0:
                 freq_out = self.freq_new_fc(freq_out)
 
-            freq_out = freq_out.reshape(batch_size, self.num_segments - 1, -1)
+            freq_out = freq_out.reshape(batch_size, self.num_segments, -1)
             freq_out = self.consensus(freq_out)
 
             if epoch == None or epoch >= warm_up_epoch:
@@ -289,7 +268,7 @@ class TSN(nn.Module):
                     base_out = self.new_fc(base_out)
                 base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])
                 output = self.consensus(base_out)
-                return output.squeeze().softmax(dim=1) + freq_out.squeeze().softmax(dim=1)
+                return (output.squeeze().softmax(dim=1) + freq_out.squeeze().softmax(dim=1)) / 2
             else:
                 return freq_out.squeeze()
 

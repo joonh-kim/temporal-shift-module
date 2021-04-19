@@ -27,11 +27,11 @@ parser.add_argument('--loss_type', type=str, default="nll",
                     choices=['nll'])
 parser.add_argument('--img_feature_dim', default=256, type=int, help="the feature dimension for each frame")
 parser.add_argument('--suffix', type=str, default=None)
-parser.add_argument('--pretrain', type=str, default='imagenet')
+parser.add_argument('--pretrain', type=str, default='scratch')
 parser.add_argument('--tune_from', type=str, default=None, help='fine-tune from checkpoint')
 
 # ========================= Learning Configs ==========================
-parser.add_argument('--epochs', default=150, type=int, metavar='N',
+parser.add_argument('--epochs', default=196, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('-b', '--batch-size', default=32, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
