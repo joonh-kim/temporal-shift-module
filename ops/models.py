@@ -215,12 +215,10 @@ class TSN(nn.Module):
             input_DCT_freqnorm[:, : self.num_segments, :] = (input_DCT[:, : self.num_segments, :]
                                                              - freqwise_mean[:, 0].unsqueeze(0).unsqueeze(-1)) \
                                                             / freqwise_std[:, 0].unsqueeze(0).unsqueeze(-1)
-            input_DCT_freqnorm[:, self.num_segments: 2 * self.num_segments, :] = (input_DCT[:,
-                                                                                  self.num_segments: 2 * self.num_segments, :]
+            input_DCT_freqnorm[:, self.num_segments: 2 * self.num_segments, :] = (input_DCT[:, self.num_segments: 2 * self.num_segments, :]
                                                                                   - freqwise_mean[:, 1].unsqueeze(0).unsqueeze(-1)) \
                                                                                  / freqwise_std[:, 1].unsqueeze(0).unsqueeze(-1)
-            input_DCT_freqnorm[:, 2 * self.num_segments: 3 * self.num_segments, :] = (input_DCT[:,
-                                                                                      2 * self.num_segments: 3 * self.num_segments, :]
+            input_DCT_freqnorm[:, 2 * self.num_segments: 3 * self.num_segments, :] = (input_DCT[:, 2 * self.num_segments: 3 * self.num_segments, :]
                                                                                       - freqwise_mean[:, 2].unsqueeze(0).unsqueeze(-1)) \
                                                                                      / freqwise_std[:, 2].unsqueeze(0).unsqueeze(-1)
 

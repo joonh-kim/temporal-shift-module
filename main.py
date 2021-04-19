@@ -24,6 +24,13 @@ best_prec1 = 0
 
 
 def main():
+    seed = 5468
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
     global args, best_prec1
     args = parser.parse_args()
 

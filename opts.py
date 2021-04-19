@@ -33,9 +33,9 @@ parser.add_argument('--tune_from', type=str, default=None, help='fine-tune from 
 # ========================= Learning Configs ==========================
 parser.add_argument('--epochs', default=196, type=int, metavar='N',
                     help='number of total epochs to run')
-parser.add_argument('-b', '--batch-size', default=32, type=int,
+parser.add_argument('-b', '--batch-size', default=4, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
-parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--lr_steps', default=[20, 40], type=float, nargs="+",
                     metavar='LRSteps', help='epochs to decay learning rate by 10')
