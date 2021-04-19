@@ -382,7 +382,7 @@ def adjust_learning_rate(optimizer, epoch, warm_up_epoch, lr_steps, two_stream):
         #
         # import math
         # if epoch < warm_up_epoch:
-        #     lr_freq = 0.5 * args.lr * (1 + math.cos(math.pi * epoch / args.epochs))
+        #     lr_freq = 0.5 * args.lr * (1 + math.cos(math.pi * epoch / warm_up_epoch))
         # else:
         #     lr_freq = args.lr * 0.01 * decay
 
