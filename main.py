@@ -323,7 +323,7 @@ def validate(val_loader, model, criterion, criterion_wo_softmax, epoch, log=None
             target = target.cuda()
 
             # compute output
-            output = model(input)
+            output = model(input, epoch, args.warm_up_epoch)
             if args.two_stream:
                 loss = criterion_wo_softmax(torch.log(output), target)
             else:
