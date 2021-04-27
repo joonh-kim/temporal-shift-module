@@ -71,11 +71,6 @@ def main():
     model = torch.nn.DataParallel(model, device_ids=args.gpus).cuda()
 
     if args.two_stream:
-        # optimizer = torch.optim.SGD([{'params': model.module.freq_model.parameters()},
-        #                              {'params': model.module.freq_new_fc.parameters()},
-        #                              {'params': model.module.base_model.parameters(), 'lr': args.lr * 0.01},
-        #                              {'params': model.module.new_fc.parameters(), 'lr': args.lr * 0.01 * 10}],
-        #                             lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
         optimizer = torch.optim.SGD(model.module.parameters(),
                                     lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     else:
@@ -377,20 +372,6 @@ def save_checkpoint(state, is_best):
 
 def adjust_learning_rate(optimizer, epoch, warm_up_epoch, lr_steps, two_stream):
     if two_stream:
-        # decay = 0.1 ** (sum(epoch >= np.array([x + warm_up_epoch for x in lr_steps])))
-        # lr_time = args.lr * 0.01 * decay
-        #
-        # import math
-        # if epoch < warm_up_epoch:
-        #     lr_freq = 0.5 * args.lr * (1 + math.cos(math.pi * epoch / warm_up_epoch))
-        # else:
-        #     lr_freq = args.lr * 0.01 * decay
-
-        # optimizer.param_groups[0]['lr'] = lr_time
-        # optimizer.param_groups[1]['lr'] = lr_time * 10
-        # optimizer.param_groups[2]['lr'] = lr_freq
-        # optimizer.param_groups[3]['lr'] = lr_freq
-
         import math
         lr = 0.5 * args.lr * (1 + math.cos(math.pi * epoch / args.epochs))
         optimizer.param_groups[0]['lr'] = lr

@@ -5,7 +5,7 @@
 import multiprocessing
 import argparse
 parser = argparse.ArgumentParser(description="PyTorch implementation of Temporal Segment Networks")
-parser.add_argument('--dataset', default='minikinetics', type=str)
+parser.add_argument('--dataset', default='minikinetics', type=str, help='minikinetics or somethingv2')
 parser.add_argument('--modality', default='RGB', type=str)
 parser.add_argument('--train_list', type=str, default="")
 parser.add_argument('--val_list', type=str, default="")
@@ -27,7 +27,7 @@ parser.add_argument('--loss_type', type=str, default="nll",
                     choices=['nll'])
 parser.add_argument('--img_feature_dim', default=256, type=int, help="the feature dimension for each frame")
 parser.add_argument('--suffix', type=str, default=None)
-parser.add_argument('--pretrain', type=str, default='scratch')
+parser.add_argument('--pretrain', type=str, default='scratch', help='scratch or imagenet')
 parser.add_argument('--tune_from', type=str, default=None, help='fine-tune from checkpoint')
 
 # ========================= Learning Configs ==========================
@@ -49,9 +49,9 @@ parser.add_argument('--no_partialbn', '--npb', default=False, action="store_true
 
 # ========================= Monitor Configs ==========================
 parser.add_argument('--print-freq', '-p', default=20, type=int,
-                    metavar='N', help='print frequency (default: 10)')
+                    metavar='N', help='print frequency (default: 20)')
 parser.add_argument('--eval-freq', '-ef', default=10, type=int,
-                    metavar='N', help='evaluation frequency (default: 5)')
+                    metavar='N', help='evaluation frequency (default: 10)')
 
 # ========================= Runtime Configs ==========================
 parser.add_argument('-j', '--workers', default=multiprocessing.cpu_count() // 3 * 4, type=int, metavar='N',

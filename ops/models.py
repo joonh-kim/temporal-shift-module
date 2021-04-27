@@ -10,12 +10,6 @@ from ops.transforms import *
 from torch.nn.init import normal_, constant_
 from ops.utils import DCTmatrix, DCTmatrix_hat
 
-def init_hidden(batch_size, cell_size):
-    init_cell = torch.Tensor(batch_size, cell_size).zero_()
-    if torch.cuda.is_available():
-        init_cell = init_cell.cuda()
-    return init_cell
-
 class TSN(nn.Module):
     def __init__(self, num_class, num_segments, modality,
                  base_model='resnet101', new_length=1,
