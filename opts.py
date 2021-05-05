@@ -12,12 +12,11 @@ parser.add_argument('--val_list', type=str, default="")
 parser.add_argument('--root_path', type=str, default="")
 
 # ========================= Custom Configs ==========================
-parser.add_argument('--two_stream', default=True, action="store_false", help='add frequency stream')
-parser.add_argument('--warm_up_epoch', default=0, type=int, help="0 when 1stream")
+parser.add_argument('--input_size', type=int, default=56)
 
 # ========================= Model Configs ==========================
 parser.add_argument('--arch', type=str, default="resnet50")
-parser.add_argument('--num_segments', type=int, default=8)
+parser.add_argument('--num_segments', type=int, default=16)
 parser.add_argument('--consensus_type', type=str, default='avg')
 parser.add_argument('--k', type=int, default=3)
 
@@ -27,15 +26,15 @@ parser.add_argument('--loss_type', type=str, default="nll",
                     choices=['nll'])
 parser.add_argument('--img_feature_dim', default=256, type=int, help="the feature dimension for each frame")
 parser.add_argument('--suffix', type=str, default=None)
-parser.add_argument('--pretrain', type=str, default='scratch', help='scratch or imagenet')
+parser.add_argument('--pretrain', type=str, default='imagenet', help='scratch or imagenet')
 parser.add_argument('--tune_from', type=str, default=None, help='fine-tune from checkpoint')
 
 # ========================= Learning Configs ==========================
-parser.add_argument('--epochs', default=196, type=int, metavar='N',
+parser.add_argument('--epochs', default=50, type=int, metavar='N',
                     help='number of total epochs to run')
-parser.add_argument('-b', '--batch-size', default=32, type=int,
+parser.add_argument('-b', '--batch-size', default=4, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
-parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
+parser.add_argument('--lr', '--learning-rate', default=1e-4, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--lr_steps', default=[20, 40], type=float, nargs="+",
                     metavar='LRSteps', help='epochs to decay learning rate by 10')

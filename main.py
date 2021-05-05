@@ -24,7 +24,7 @@ best_prec1 = 0
 
 
 def main():
-    seed = 5468
+    seed = 20193146
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -37,11 +37,9 @@ def main():
     num_class, args.train_list, args.val_list, args.root_path, prefix = dataset_config.return_dataset(args.dataset,
                                                                                                       args.modality)
     full_arch_name = args.arch
-    if args.two_stream:
-        full_arch_name += '_2stream'
     args.store_name = '_'.join(
-        ['TSN', args.dataset, args.modality, full_arch_name, 'segment%d' % args.num_segments,
-         'e{}'.format(args.epochs), 'warmup{}'.format(args.warm_up_epoch)])
+        ['2D', args.dataset, full_arch_name, 'segment%d' % args.num_segments, 'e{}'.format(args.epochs),
+         'input%d' % args.input_size])
     if args.pretrain != 'imagenet':
         args.store_name += '_{}'.format(args.pretrain)
     if args.dense_sample:
@@ -52,15 +50,14 @@ def main():
 
     check_rootfolders()
 
-    model = TSN(num_class, args.num_segments, args.modality,
+    model = TSN(num_class, args.num_segments, args.modality, args.input_size,
                 base_model=args.arch,
                 consensus_type=args.consensus_type,
                 dropout=args.dropout,
                 img_feature_dim=args.img_feature_dim,
                 partial_bn=not args.no_partialbn,
                 pretrain=args.pretrain,
-                fc_lr5=not (args.tune_from and args.dataset in args.tune_from),
-                two_stream=args.two_stream)
+                fc_lr5=not (args.tune_from and args.dataset in args.tune_from))
 
     crop_size = model.crop_size
     scale_size = model.scale_size
@@ -70,13 +67,9 @@ def main():
 
     model = torch.nn.DataParallel(model, device_ids=args.gpus).cuda()
 
-    if args.two_stream:
-        optimizer = torch.optim.SGD(model.module.parameters(),
-                                    lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-    else:
-        optimizer = torch.optim.SGD([{'params': model.module.base_model.parameters()},
-                                     {'params': model.module.new_fc.parameters(), 'lr': args.lr * 10}],
-                                    lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    optimizer = torch.optim.SGD([{'params': model.module.base_model.parameters()},
+                                 {'params': model.module.new_fc.parameters(), 'lr': args.lr * 10}],
+                                lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
     if args.resume:
         if os.path.isfile(args.resume):
@@ -122,7 +115,7 @@ def main():
     cudnn.benchmark = True
 
     # Data loading code
-    normalize = GroupNormalize(input_mean, input_std, args.two_stream)
+    normalize = GroupNormalize(input_mean, input_std)
 
     data_length = 1
 
@@ -135,7 +128,7 @@ def main():
                        transform=torchvision.transforms.Compose([
                            train_augmentation,
                            Stack(roll=False),
-                           ToTorchFormatTensor(div=False if args.two_stream else True),
+                           ToTorchFormatTensor(div=True),
                            normalize,
                        ]), dense_sample=args.dense_sample),
             batch_size=args.batch_size, shuffle=True,
@@ -152,7 +145,7 @@ def main():
                            GroupScale(int(scale_size)),
                            GroupCenterCrop(crop_size),
                            Stack(roll=False),
-                           ToTorchFormatTensor(div=False if args.two_stream else True),
+                           ToTorchFormatTensor(div=True),
                            normalize,
                        ]), dense_sample=args.dense_sample),
             batch_size=args.batch_size, shuffle=False,
@@ -166,7 +159,7 @@ def main():
                        transform=torchvision.transforms.Compose([
                            train_augmentation,
                            Stack(roll=False),
-                           ToTorchFormatTensor(div=False if args.two_stream else True),
+                           ToTorchFormatTensor(div=True),
                            normalize,
                        ]), dense_sample=args.dense_sample),
             batch_size=args.batch_size, shuffle=True,
@@ -183,7 +176,7 @@ def main():
                            GroupScale(int(scale_size)),
                            GroupCenterCrop(crop_size),
                            Stack(roll=False),
-                           ToTorchFormatTensor(div=False if args.two_stream else True),
+                           ToTorchFormatTensor(div=True),
                            normalize,
                        ]), dense_sample=args.dense_sample),
             batch_size=args.batch_size, shuffle=False,
@@ -192,12 +185,11 @@ def main():
     # define loss function (criterion) and optimizer
     if args.loss_type == 'nll':
         criterion = torch.nn.CrossEntropyLoss().cuda()
-        criterion_wo_softmax = torch.nn.NLLLoss().cuda()
     else:
         raise ValueError("Unknown loss type")
 
     if args.evaluate:
-        validate(val_loader, model, criterion, criterion_wo_softmax, None)
+        validate(val_loader, model, criterion, None)
         return
 
     log_training = open(os.path.join(args.root_log, args.store_name, 'log.csv'), 'w')
@@ -206,14 +198,14 @@ def main():
     tf_writer = SummaryWriter(log_dir=os.path.join(args.root_log, args.store_name))
 
     for epoch in range(args.start_epoch, args.epochs):
-        adjust_learning_rate(optimizer, epoch, args.warm_up_epoch, args.lr_steps, args.two_stream)
+        adjust_learning_rate(optimizer, epoch, args.lr_steps)
 
         # train for one epoch
-        train(train_loader, model, criterion, criterion_wo_softmax, optimizer, epoch, log_training, tf_writer)
+        train(train_loader, model, criterion, optimizer, epoch, log_training, tf_writer)
 
         # evaluate on validation set
         if (epoch + 1) % args.eval_freq == 0 or epoch == args.epochs - 1:
-            prec1 = validate(val_loader, model, criterion, criterion_wo_softmax, epoch, log_training, tf_writer)
+            prec1 = validate(val_loader, model, criterion, epoch, log_training, tf_writer)
 
             # remember best prec@1 and save checkpoint
             is_best = prec1 > best_prec1
@@ -234,7 +226,7 @@ def main():
             }, is_best)
 
 
-def train(train_loader, model, criterion, criterion_wo_softmax, optimizer, epoch, log, tf_writer):
+def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -259,11 +251,8 @@ def train(train_loader, model, criterion, criterion_wo_softmax, optimizer, epoch
         target_var = torch.autograd.Variable(target)
 
         # compute output
-        output = model(input_var, epoch, args.warm_up_epoch)
-        if args.two_stream:
-            loss = criterion_wo_softmax(torch.log(output), target_var)
-        else:
-            loss = criterion(output, target_var)
+        output = model(input_var)
+        loss = criterion(output, target_var)
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
@@ -303,7 +292,7 @@ def train(train_loader, model, criterion, criterion_wo_softmax, optimizer, epoch
     tf_writer.add_scalar('lr', optimizer.param_groups[-1]['lr'], epoch)
 
 
-def validate(val_loader, model, criterion, criterion_wo_softmax, epoch, log=None, tf_writer=None):
+def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
@@ -318,11 +307,8 @@ def validate(val_loader, model, criterion, criterion_wo_softmax, epoch, log=None
             target = target.cuda()
 
             # compute output
-            output = model(input, epoch, args.warm_up_epoch)
-            if args.two_stream:
-                loss = criterion_wo_softmax(torch.log(output), target)
-            else:
-                loss = criterion(output, target)
+            output = model(input)
+            loss = criterion(output, target)
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
@@ -370,18 +356,13 @@ def save_checkpoint(state, is_best):
         shutil.copyfile(filename, filename.replace('pth.tar', 'best.pth.tar'))
 
 
-def adjust_learning_rate(optimizer, epoch, warm_up_epoch, lr_steps, two_stream):
-    if two_stream:
-        import math
-        lr = 0.5 * args.lr * (1 + math.cos(math.pi * epoch / args.epochs))
-        optimizer.param_groups[0]['lr'] = lr
+def adjust_learning_rate(optimizer, epoch, lr_steps):
 
-    else:
-        decay = 0.1 ** (sum(epoch >= np.array(lr_steps)))
-        lr_time = args.lr * decay
+    decay = 0.1 ** (sum(epoch >= np.array(lr_steps)))
+    lr_time = args.lr * decay
 
-        optimizer.param_groups[0]['lr'] = lr_time
-        optimizer.param_groups[1]['lr'] = lr_time * 10
+    optimizer.param_groups[0]['lr'] = lr_time
+    optimizer.param_groups[1]['lr'] = lr_time * 10
 
 
 def check_rootfolders():
