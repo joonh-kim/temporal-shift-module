@@ -90,13 +90,20 @@ class TSNDataSet(data.Dataset):
             return np.array(offsets) + 1
         else:  # normal sample
             average_duration = (record.num_frames - self.new_length + 1) // self.num_segments
-            if average_duration > 0:
-                offsets = np.multiply(list(range(self.num_segments)), average_duration) + randint(average_duration,
+            if average_duration > 2:
+                full_offsets = np.multiply(list(range(self.num_segments)), average_duration) + randint(average_duration,
                                                                                                   size=self.num_segments)
+                half_offsets = np.multiply(list(range(self.num_segments)), average_duration // 2) + randint(average_duration // 2,
+                                                                                             size=self.num_segments)
+
+                offsets = np.append(half_offsets, full_offsets[self.num_segments // 2:])
+
             elif record.num_frames > self.num_segments:
-                offsets = np.sort(randint(record.num_frames - self.new_length + 1, size=self.num_segments))
+                full_offsets = np.sort(randint(record.num_frames - self.new_length + 1, size=self.num_segments))
+                half_offsets = np.repeat(full_offsets[:self.num_segments // 2], 2)
+                offsets = np.append(half_offsets, full_offsets[self.num_segments // 2:])
             else:
-                offsets = np.zeros((self.num_segments,))
+                offsets = np.zeros((self.num_segments * 3 // 2,))
             return offsets + 1
 
     def _get_val_indices(self, record):

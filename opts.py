@@ -12,8 +12,6 @@ parser.add_argument('--val_list', type=str, default="")
 parser.add_argument('--root_path', type=str, default="")
 
 # ========================= Custom Configs ==========================
-parser.add_argument('--two_stream', default=True, action="store_false", help='add frequency stream')
-parser.add_argument('--warm_up_epoch', default=0, type=int, help="0 when 1stream")
 
 # ========================= Model Configs ==========================
 parser.add_argument('--arch', type=str, default="resnet50")
@@ -35,7 +33,7 @@ parser.add_argument('--epochs', default=196, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('-b', '--batch-size', default=32, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
-parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.001, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--lr_steps', default=[20, 40], type=float, nargs="+",
                     metavar='LRSteps', help='epochs to decay learning rate by 10')
