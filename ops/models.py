@@ -48,6 +48,8 @@ class TSN(nn.Module):
         self._prepare_tsn(num_class)
         self.consensus = ConsensusModule(consensus_type)
 
+        self.linear = nn.Linear(num_class, 1)
+
         if not self.before_softmax:
             self.softmax = nn.Softmax()
 
@@ -123,13 +125,17 @@ class TSN(nn.Module):
             mask = torch.ones(tensor.numel(), dtype=torch.bool)
             mask[indices] = False
             return tensor[mask]
-        fast_ind = th_delete(torch.arange(self.num_segments * 3 // 2), torch.arange(self.num_segments // 2) * 2 + 1)
-        fast_ind = fast_ind.cuda()
-        fast_out = torch.index_select(base_out, 1, fast_ind)
+        base_ind = th_delete(torch.arange(self.num_segments * 3 // 2), torch.arange(self.num_segments // 2) * 2 + 1)
+        base_ind = base_ind.cuda()
+        base_out = torch.index_select(base_out, 1, base_ind)
 
-        fast_output = self.consensus(fast_out)
+        base_output = self.consensus(base_out)
         slow_output = self.consensus(slow_out)
-        return fast_output.squeeze(), slow_output.squeeze()
+
+        fast_output = self.linear(base_output.squeeze())
+        slow_output = self.linear(slow_output.squeeze())
+
+        return base_output.squeeze(), fast_output, slow_output
 
     @property
     def crop_size(self):

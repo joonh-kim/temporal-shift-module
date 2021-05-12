@@ -39,7 +39,7 @@ def main():
     full_arch_name = args.arch
     args.store_name = '_'.join(
         ['TSN', args.dataset, args.modality, full_arch_name, 'segment%d' % args.num_segments,
-         'e{}'.format(args.epochs), 'warmup{}'.format(args.warm_up_epoch)])
+         'e{}'.format(args.epochs)])
     if args.pretrain != 'imagenet':
         args.store_name += '_{}'.format(args.pretrain)
     if args.dense_sample:
@@ -68,7 +68,8 @@ def main():
     model = torch.nn.DataParallel(model, device_ids=args.gpus).cuda()
 
     optimizer = torch.optim.SGD([{'params': model.module.base_model.parameters()},
-                                 {'params': model.module.new_fc.parameters(), 'lr': args.lr * 10}],
+                                 {'params': model.module.new_fc.parameters(), 'lr': args.lr * 10},
+                                 {'params': model.module.linear.parameters(), 'lr': args.lr * 10}],
                                 lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
     if args.resume:
@@ -253,9 +254,9 @@ def train(train_loader, model, criterion, bce_criterion, optimizer, epoch, log, 
         target_var = torch.autograd.Variable(target)
 
         # compute output
-        fast_output, slow_output = model(input_var)
+        output, fast_output, slow_output = model(input_var)
 
-        class_loss = criterion(fast_output, target_var)
+        class_loss = criterion(output, target_var)
 
         speed_loss = bce_criterion(fast_output, torch.FloatTensor(fast_output.data.size()).fill_(1).cuda())
         speed_loss += bce_criterion(slow_output, torch.FloatTensor(slow_output.data.size()).fill_(0).cuda())
@@ -265,7 +266,7 @@ def train(train_loader, model, criterion, bce_criterion, optimizer, epoch, log, 
         loss = class_loss
 
         # measure accuracy and record loss
-        prec1, prec5 = accuracy(fast_output.data, target, topk=(1, 5))
+        prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
         losses.update(class_loss.item(), input.size(0))
         speed_losses.update(speed_loss.item(), input.size(0))
         top1.update(prec1.item(), input.size(0))
@@ -320,7 +321,7 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
             target = target.cuda()
 
             # compute output
-            output, _ = model(input)
+            output, _, _ = model(input)
             loss = criterion(output, target)
 
             # measure accuracy and record loss
@@ -376,6 +377,7 @@ def adjust_learning_rate(optimizer, epoch, lr_steps):
 
     optimizer.param_groups[0]['lr'] = lr_time
     optimizer.param_groups[1]['lr'] = lr_time * 10
+    optimizer.param_groups[2]['lr'] = lr_time * 10
 
 
 def check_rootfolders():
