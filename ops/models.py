@@ -9,31 +9,10 @@ from ops.basic_ops import ConsensusModule
 from ops.transforms import *
 from torch.nn.init import normal_, constant_
 
-from ops.utils import DCTmatrix, DCTmatrix_rgb
 import torch.nn.functional as F
 
-def make_a_linear(input_dim, output_dim):
-    linear_model = nn.Linear(input_dim, output_dim)
-    normal_(linear_model.weight, 0, 0.001)
-    constant_(linear_model.bias, 0)
-    return linear_model
-
-def conv1x1(in_planes, out_planes):
-    return nn.Conv1d(in_planes, out_planes, kernel_size=1)
-
-def DCTmatrix_hat(C, length):
-    C_hat = torch.zeros(3 * length, 3 * length)
-    for i in range(3 * length):
-        if i < length:
-            C_hat[i, :length] = C[i, :]
-        elif i < 2 * length:
-            C_hat[i, length: 2 * length] = C[i - length, :]
-        else:
-            C_hat[i, 2 * length: 3 * length] = C[i - (2 * length), :]
-    return C_hat
-
 class TSN(nn.Module):
-    def __init__(self, num_class, num_segments, modality, freq_selection,
+    def __init__(self, num_class, num_segments, modality,
                  base_model='resnet101', new_length=None,
                  consensus_type='avg', before_softmax=True,
                  dropout=0.8, img_feature_dim=256,
@@ -43,7 +22,6 @@ class TSN(nn.Module):
         super(TSN, self).__init__()
         self.modality = modality
         self.num_segments = num_segments
-        self.freq_selection = freq_selection
         self.reshape = True
         self.before_softmax = before_softmax
         self.dropout = dropout
@@ -64,7 +42,7 @@ class TSN(nn.Module):
             raise ValueError("Only avg consensus can be used after Softmax")
 
         if new_length is None:
-            self.new_length = 1 if modality in ["RGB", "Freq"] else 5
+            self.new_length = 1 if modality == "RGB" else 5
         else:
             self.new_length = new_length
         if print_spec:
@@ -73,26 +51,18 @@ class TSN(nn.Module):
     TSN Configurations:
         input_modality:     {}
         num_segments:       {}
-        freq_selection:     {}
         new_length:         {}
         consensus_module:   {}
         dropout_ratio:      {}
         img_feature_dim:    {}
         pretrain:           {}
-            """.format(base_model, self.modality, self.num_segments, self.freq_selection,
+            """.format(base_model, self.modality, self.num_segments,
                        self.new_length, consensus_type, self.dropout,
                        self.img_feature_dim, self.pretrain)))
 
         self._prepare_base_model(base_model)
 
         feature_dim = self._prepare_tsn(num_class)
-
-        if self.freq_selection:
-            self._prepare_policy_network(num_segments)
-            self.DCT = DCTmatrix(num_segments)
-            self.DCT_hat = DCTmatrix_rgb(self.DCT, num_segments)
-            self.DCT, self.DCT_hat = \
-                torch.from_numpy(self.DCT).type(torch.float32), torch.from_numpy(self.DCT_hat).type(torch.float32)
 
         if self.modality == 'Flow':
             print("Converting the ImageNet model to a flow init model")
@@ -203,10 +173,6 @@ class TSN(nn.Module):
         else:
             raise ValueError('Unknown base model: {}'.format(base_model))
 
-    def _prepare_policy_network(self, num_segments):
-        self.policy_linear = make_a_linear(2 * num_segments - 1, num_segments)
-        self.policy_1x1 = conv1x1(3, 2)
-
     def train(self, mode=True):
         """
         Override the default train() to freeze the BN parameters
@@ -235,15 +201,13 @@ class TSN(nn.Module):
         normal_bias = []
         lr5_weight = []
         lr10_bias = []
-        conv1_weight = []
-        conv1_bias = []
         bn = []
         custom_ops = []
 
         conv_cnt = 0
         bn_cnt = 0
         for m in self.modules():
-            if isinstance(m, torch.nn.Conv2d) or isinstance(m, torch.nn.Conv3d):
+            if isinstance(m, torch.nn.Conv2d) or isinstance(m, torch.nn.Conv3d) or isinstance(m, torch.nn.Conv1d):
                 ps = list(m.parameters())
                 conv_cnt += 1
                 if conv_cnt == 1:
@@ -254,24 +218,6 @@ class TSN(nn.Module):
                     normal_weight.append(ps[0])
                     if len(ps) == 2:
                         normal_bias.append(ps[1])
-
-            elif isinstance(m, torch.nn.Conv1d):
-                ps = list(m.parameters())
-                conv_cnt += 1
-                if conv_cnt == 1:
-                    first_conv_weight.append(ps[0])
-                    if len(ps) == 2:
-                        first_conv_bias.append(ps[1])
-                else:
-                    if self.freq_selection:
-                        conv1_weight.append(ps[0])
-                    else:
-                        normal_weight.append(ps[0])
-                    if len(ps) == 2:
-                        if self.freq_selection:
-                            conv1_bias.append(ps[1])
-                        else:
-                            normal_bias.append(ps[1])
 
             elif isinstance(m, torch.nn.Linear):
                 ps = list(m.parameters())
@@ -301,173 +247,31 @@ class TSN(nn.Module):
                 if len(list(m.parameters())) > 0:
                     raise ValueError("New atomic module type: {}. Need to give it a learning policy".format(type(m)))
 
-        if self.modality == 'Freq':
-            group_policies = [
-                {'params': first_conv_weight, 'lr_mult': 1, 'decay_mult': 1,
-                 'name': "first_conv_weight"},
-                {'params': first_conv_bias, 'lr_mult': 1, 'decay_mult': 1,
-                 'name': "first_conv_bias"},
-                {'params': normal_weight, 'lr_mult': 1, 'decay_mult': 1,
-                 'name': "normal_weight"},
-                {'params': normal_bias, 'lr_mult': 1, 'decay_mult': 1,
-                 'name': "normal_bias"},
-                {'params': bn, 'lr_mult': 1, 'decay_mult': 1,
-                 'name': "BN scale/shift"},
-                {'params': custom_ops, 'lr_mult': 1, 'decay_mult': 1,
-                 'name': "custom_ops"},
-                # for fc
-                {'params': lr5_weight, 'lr_mult': 1, 'decay_mult': 1,
-                 'name': "lr5_weight"},
-                {'params': lr10_bias, 'lr_mult': 1, 'decay_mult': 1,
-                 'name': "lr10_bias"},
-                {'params': conv1_weight, 'lr_mult': 10, 'decay_mult': 1,
-                 'name': "conv1_weight"},
-                {'params': conv1_bias, 'lr_mult': 10, 'decay_mult': 1,
-                 'name': "conv1_bias"}
-            ]
-        else:
-            group_policies = [
-                {'params': first_conv_weight, 'lr_mult': 5 if self.modality == 'Flow' else 1, 'decay_mult': 1,
-                 'name': "first_conv_weight"},
-                {'params': first_conv_bias, 'lr_mult': 10 if self.modality == 'Flow' else 2, 'decay_mult': 0,
-                 'name': "first_conv_bias"},
-                {'params': normal_weight, 'lr_mult': 1, 'decay_mult': 1,
-                 'name': "normal_weight"},
-                {'params': normal_bias, 'lr_mult': 2, 'decay_mult': 0,
-                 'name': "normal_bias"},
-                {'params': bn, 'lr_mult': 1, 'decay_mult': 0,
-                 'name': "BN scale/shift"},
-                {'params': custom_ops, 'lr_mult': 1, 'decay_mult': 1,
-                 'name': "custom_ops"},
-                # for fc
-                {'params': lr5_weight, 'lr_mult': 5, 'decay_mult': 1,
-                 'name': "lr5_weight"},
-                {'params': lr10_bias, 'lr_mult': 10, 'decay_mult': 0,
-                 'name': "lr10_bias"},
-                {'params': conv1_weight, 'lr_mult': 5, 'decay_mult': 1,
-                 'name': "conv1_weight"},
-                {'params': conv1_bias, 'lr_mult': 10, 'decay_mult': 0,
-                 'name': "conv1_bias"}
-            ]
+        group_policies = [
+            {'params': first_conv_weight, 'lr_mult': 5 if self.modality == 'Flow' else 1, 'decay_mult': 1,
+             'name': "first_conv_weight"},
+            {'params': first_conv_bias, 'lr_mult': 10 if self.modality == 'Flow' else 2, 'decay_mult': 0,
+             'name': "first_conv_bias"},
+            {'params': normal_weight, 'lr_mult': 1, 'decay_mult': 1,
+             'name': "normal_weight"},
+            {'params': normal_bias, 'lr_mult': 2, 'decay_mult': 0,
+             'name': "normal_bias"},
+            {'params': bn, 'lr_mult': 1, 'decay_mult': 0,
+             'name': "BN scale/shift"},
+            {'params': custom_ops, 'lr_mult': 1, 'decay_mult': 1,
+             'name': "custom_ops"},
+            # for fc
+            {'params': lr5_weight, 'lr_mult': 5, 'decay_mult': 1,
+             'name': "lr5_weight"},
+            {'params': lr10_bias, 'lr_mult': 10, 'decay_mult': 0,
+             'name': "lr10_bias"}
+        ]
         return group_policies
 
-    def forward(self, input, cur_epoch, warm_up_epoch=None, no_reshape=False):
-        if self.freq_selection:
-            batch_size = input.shape[0]
-            height = input.shape[2]
-            width = input.shape[3]
-            tau = 0.5
-            freq_mean = [38.93153895,  36.49603519,  34.11526499]
-            freq_std = [103.21031231,  96.8493695,  90.48412606]
-            freqwise_mean = torch.tensor([[ 3.11999440e+02,  2.92734101e+02,  2.73512572e+02],
-                                          [ 1.31976900e-01,  4.65869393e-03,  1.07130773e-01],
-                                          [-7.42678419e-01, -8.82907354e-01, -8.00437933e-01],
-                                          [ 1.45772034e-01,  1.69715159e-01,  1.56224231e-01],
-                                          [ 1.94490182e-02,  3.83501204e-02,  3.46578196e-02],
-                                          [-1.36656539e-02, -1.99214745e-02, -2.45398486e-02],
-                                          [-1.46741678e-01, -1.39614321e-01, -1.30619307e-01],
-                                          [ 5.87596261e-02,  6.39000697e-02,  6.71322088e-02]]).cuda()
-            freqwise_std = torch.tensor([[ 99.39481043,  99.41126767, 105.53474589],
-                                         [ 23.90491416,  22.84780224,  23.67578776],
-                                         [ 16.03833016,  15.46310555,  16.23684146],
-                                         [ 12.05854863,  11.69103394,  12.07319077],
-                                         [  9.48843771,   9.19222063,   9.49688663],
-                                         [  7.61678615,   7.42603237,   7.62194055],
-                                         [  6.39031728,   6.23412457,   6.36752511],
-                                         [  5.77056411,   5.65715373,   5.81123869]]).cuda()
-
-            # TODO: RGBRGBRGB... -> RRR...GGG...BBB...
-            r_indices = (torch.arange(self.num_segments) * 3).cuda()
-            input_r = torch.index_select(input.reshape(batch_size, 3 * self.num_segments, -1), 1, r_indices)
-            input_g = torch.index_select(input.reshape(batch_size, 3 * self.num_segments, -1), 1, r_indices + 1)
-            input_b = torch.index_select(input.reshape(batch_size, 3 * self.num_segments, -1), 1, r_indices + 2)
-            input_reshape = torch.cat((input_r, input_g, input_b), dim=1)
-
-            # TODO: DCT
-            input_DCT = []
-            self.DCT_hat = self.DCT_hat.cuda()
-            for batch in range(batch_size):
-                input_DCT.append(torch.matmul(self.DCT_hat, input_reshape[batch, :, :]).unsqueeze(0))
-            input_DCT = torch.cat(input_DCT, 0)
-
-            # TODO: normalize in the frequency domain
-            input_DCT_norm = torch.zeros_like(input_DCT).cuda()
-            input_DCT_norm[:, : self.num_segments, :] = \
-                (input_DCT[:, : self.num_segments, :] - freq_mean[0]) / freq_std[0]
-            input_DCT_norm[:, self.num_segments: 2 * self.num_segments, :] = \
-                (input_DCT[:, self.num_segments: 2 * self.num_segments, :] - freq_mean[1]) / freq_std[1]
-            input_DCT_norm[:, 2 * self.num_segments: 3 * self.num_segments, :] = \
-                (input_DCT[:, 2 * self.num_segments: 3 * self.num_segments, :] - freq_mean[2]) / freq_std[2]
-
-            # TODO: policy network
-            mean_per_freq = torch.mean(input_DCT_norm, dim=2)
-            feat_3channel = mean_per_freq.reshape(batch_size, 3, self.num_segments)
-            feat_2channel = self.policy_1x1(feat_3channel)
-            p_t = torch.log(F.softmax(feat_2channel, dim=1).clamp(min=1e-8))
-
-            # r_t = torch.cat(
-            #     [F.gumbel_softmax(p_t[b_i:b_i + 1], tau=tau, hard=True, dim=1) for b_i in range(p_t.shape[0])])
-            r_t = F.gumbel_softmax(p_t, tau, hard=True, dim=1)
-            mask = r_t[:, 1, :].clone()
-
-            # TODO: masking
-            if self.modality == 'RGB':
-                # normalize in the time domain
-                input_reshape_norm = input_reshape / 255
-                input_reshape_norm[:, : self.num_segments, :] = \
-                    (input_reshape[:, : self.num_segments, :] - self.input_mean[0]) / self.input_std[0]
-                input_reshape_norm[:, self.num_segments: 2 * self.num_segments, :] = \
-                    (input_reshape[:, self.num_segments: 2 * self.num_segments, :] - self.input_mean[1]) / self.input_std[1]
-                input_reshape_norm[:, 2 * self.num_segments: 3 * self.num_segments, :] = \
-                    (input_reshape[:, 2 * self.num_segments: 3 * self.num_segments, :] - self.input_mean[2]) / self.input_std[2]
-
-                if cur_epoch == None or warm_up_epoch <= cur_epoch:
-                    mask_exp = mask.repeat(1, 3)
-                    input_masked = torch.zeros_like(input_reshape_norm)
-                    for i in range(batch_size):
-                        masked_DCT_hat = mask_exp[i, :].unsqueeze(-1) * self.DCT_hat
-                        input_masked[i] = torch.matmul(torch.transpose(masked_DCT_hat, 0, 1),
-                                                            torch.matmul(masked_DCT_hat, input_reshape_norm[i]))
-                else:
-                    input_masked = input_reshape_norm
-            elif self.modality == 'Freq':
-                # TODO: frequency-wise normalization
-                input_DCT_freqnorm = torch.zeros_like(input_DCT).cuda()
-                input_DCT_freqnorm[:, : self.num_segments, :] = (input_DCT[:, : self.num_segments, :]
-                                                                 - freqwise_mean[:, 0].unsqueeze(0).unsqueeze(-1)) \
-                                                                / freqwise_std[:, 0].unsqueeze(0).unsqueeze(-1)
-                input_DCT_freqnorm[:, self.num_segments: 2 * self.num_segments, :] = (input_DCT[:, self.num_segments: 2 * self.num_segments, :]
-                                                                                      - freqwise_mean[:, 1].unsqueeze(0).unsqueeze(-1)) \
-                                                                                     / freqwise_std[:, 1].unsqueeze(0).unsqueeze(-1)
-                input_DCT_freqnorm[:, 2 * self.num_segments: 3 * self.num_segments, :] = (input_DCT[:, 2 * self.num_segments: 3 * self.num_segments, :]
-                                                                                          - freqwise_mean[:, 2].unsqueeze(0).unsqueeze(-1)) \
-                                                                                         / freqwise_std[:, 2].unsqueeze(0).unsqueeze(-1)
-
-                if cur_epoch == None or warm_up_epoch <= cur_epoch:
-                    mask_exp = mask.repeat(1, 3)
-                    input_masked = torch.zeros_like(input_DCT_freqnorm)
-                    for i in range(batch_size):
-                        input_masked[i] = mask_exp[i, :].unsqueeze(-1) * input_DCT_freqnorm[i]
-                else:
-                    input_masked = input_DCT_freqnorm
-            else:
-                NotImplementedError("Inappropriate modality!")
-
-            # TODO: RRR...GGG...BBB... -> RGBRGBRGB...
-            input_new = torch.zeros_like(input_masked).cuda()
-            for i in range(3 * self.num_segments):
-                if i < self.num_segments:
-                    input_new[:, 3 * i, :] = input_masked[:, i, :]
-                elif i < 2 * self.num_segments:
-                    input_new[:, 3 * (i - self.num_segments) + 1, :] = input_masked[:, i, :]
-                else:
-                    input_new[:, 3 * (i - 2 * self.num_segments) + 2, :] = input_masked[:, i, :]
-            input = input_new.reshape(batch_size, 3 * self.num_segments, height, width)
-        else:
-            r_t = None
+    def forward(self, input, no_reshape=False):
 
         if not no_reshape:
-            sample_len = (3 if self.modality in ['RGB', 'Freq'] else 2) * self.new_length
+            sample_len = (3 if self.modality == 'RGB' else 2) * self.new_length
 
             if self.modality == 'RGBDiff':
                 sample_len = 3 * self.new_length
@@ -489,7 +293,7 @@ class TSN(nn.Module):
             else:
                 base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])
             output = self.consensus(base_out)
-            return output.squeeze(1), r_t
+            return output.squeeze(1)
 
     def _get_diff(self, input, keep_rgb=False):
         input_c = 3 if self.modality in ["RGB", "RGBDiff"] else 2
@@ -530,7 +334,7 @@ class TSN(nn.Module):
             new_conv.bias.data = params[1].data # add bias if neccessary
         layer_name = list(container.state_dict().keys())[0][:-7] # remove .weight suffix to get the layer name
 
-        # replace the first convlution layer
+        # replace the first convolution layer
         setattr(container, layer_name, new_conv)
 
         if self.base_model_name == 'BNInception':
@@ -596,7 +400,4 @@ class TSN(nn.Module):
                                                    GroupRandomHorizontalFlip(is_flow=True)])
         elif self.modality == 'RGBDiff':
             return torchvision.transforms.Compose([GroupMultiScaleCrop(self.input_size, [1, .875, .75]),
-                                                   GroupRandomHorizontalFlip(is_flow=False)])
-        elif self.modality == 'Freq':
-            return torchvision.transforms.Compose([GroupMultiScaleCrop(self.input_size, [1, .875, .75, .66]),
                                                    GroupRandomHorizontalFlip(is_flow=False)])

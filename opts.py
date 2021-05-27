@@ -5,12 +5,9 @@
 
 import argparse
 parser = argparse.ArgumentParser(description="PyTorch implementation of Temporal Segment Networks")
-parser.add_argument('--freq-selection', default=False, action="store_false")
-# parser.add_argument('--eff-loss-weight', '--elw', default=0.0005, type=float)
-parser.add_argument('--warm-up-epoch', default=None, type=int)
 
 parser.add_argument('--dataset', default="somethingv2", type=str)
-parser.add_argument('--modality', default="RGB", type=str, help='RGB, Flow, Freq')
+parser.add_argument('--modality', default="RGB", type=str, help='RGB, Flow')
 parser.add_argument('--train_list', type=str, default="")
 parser.add_argument('--val_list', type=str, default="")
 parser.add_argument('--root_path', type=str, default="")
@@ -32,9 +29,9 @@ parser.add_argument('--tune_from', type=str, default=None, help='fine-tune from 
 # ========================= Learning Configs ==========================
 parser.add_argument('--epochs', default=50, type=int, metavar='N',
                     help='number of total epochs to run')
-parser.add_argument('-b', '--batch-size', default=2, type=int,
+parser.add_argument('-b', '--batch-size', default=4, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
-parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.005, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--lr_type', default='step', type=str,
                     metavar='LRtype', help='learning rate type')
@@ -49,7 +46,7 @@ parser.add_argument('--clip-gradient', '--gd', default=20, type=float,
 parser.add_argument('--no_partialbn', '--npb', default=False, action="store_true")
 
 # ========================= Monitor Configs ==========================
-parser.add_argument('--print-freq', '-p', default=20, type=int,
+parser.add_argument('--print-freq', '-p', default=10, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--eval-freq', '-ef', default=5, type=int,
                     metavar='N', help='evaluation frequency (default: 5)')
@@ -70,7 +67,7 @@ parser.add_argument('--flow_prefix', default="", type=str)
 parser.add_argument('--root_log',type=str, default='log')
 parser.add_argument('--root_model', type=str, default='checkpoint')
 
-parser.add_argument('--shift', default=False, action="store_true", help='use shift for models')
+parser.add_argument('--shift', default=True, action="store_true", help='use shift for models')
 parser.add_argument('--shift_div', default=8, type=int, help='number of div for shift (default: 8)')
 parser.add_argument('--shift_place', default='blockres', type=str, help='place for shift (default: stageres)')
 

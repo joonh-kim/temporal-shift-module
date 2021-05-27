@@ -43,10 +43,6 @@ def main():
         full_arch_name += '_shift{}_{}'.format(args.shift_div, args.shift_place)
     if args.temporal_pool:
         full_arch_name += '_tpool'
-    if args.freq_selection:
-        full_arch_name += '_freqselection'
-    if args.warm_up_epoch != None:
-        full_arch_name += '_warmup{}'.format(args.warm_up_epoch)
     args.store_name = '_'.join(
         ['TSM', args.dataset, args.modality, full_arch_name, args.consensus_type, 'segment%d' % args.num_segments,
          'e{}'.format(args.epochs)])
@@ -64,7 +60,7 @@ def main():
 
     check_rootfolders()
 
-    model = TSN(num_class, args.num_segments, args.modality, args.freq_selection,
+    model = TSN(num_class, args.num_segments, args.modality,
                 base_model=args.arch,
                 consensus_type=args.consensus_type,
                 dropout=args.dropout,
@@ -141,25 +137,25 @@ def main():
 
     # Data loading code
     if args.modality != 'RGBDiff':
-        normalize = GroupNormalize(input_mean, input_std, args.freq_selection)
+        normalize = GroupNormalize(input_mean, input_std)
     else:
         normalize = IdentityTransform()
 
-    if args.modality in ['RGB', 'Freq']:
+    if args.modality == 'RGB':
         data_length = 1
     elif args.modality in ['Flow', 'RGBDiff']:
         data_length = 5
 
     if args.dataset == 'minikinetics':
         train_loader = torch.utils.data.DataLoader(
-            TSNDataSet(args.root_path + '/train/', args.train_list, num_segments=args.num_segments,
+            TSNDataSet(args.dataset, args.root_path + '/train/', args.train_list, num_segments=args.num_segments,
                        new_length=data_length,
                        modality=args.modality,
                        image_tmpl=prefix,
                        transform=torchvision.transforms.Compose([
                            train_augmentation,
                            Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
-                           ToTorchFormatTensor(div=(args.arch not in ['BNInception', 'InceptionV3'] and not args.freq_selection)),
+                           ToTorchFormatTensor(div=(args.arch not in ['BNInception', 'InceptionV3'])),
                            normalize,
                        ]), dense_sample=args.dense_sample),
             batch_size=args.batch_size, shuffle=True,
@@ -167,7 +163,7 @@ def main():
             drop_last=True)  # prevent something not % n_GPU
 
         val_loader = torch.utils.data.DataLoader(
-            TSNDataSet(args.root_path + '/val/', args.val_list, num_segments=args.num_segments,
+            TSNDataSet(args.dataset, args.root_path + '/val/', args.val_list, num_segments=args.num_segments,
                        new_length=data_length,
                        modality=args.modality,
                        image_tmpl=prefix,
@@ -176,14 +172,14 @@ def main():
                            GroupScale(int(scale_size)),
                            GroupCenterCrop(crop_size),
                            Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
-                           ToTorchFormatTensor(div=(args.arch not in ['BNInception', 'InceptionV3'] and not args.freq_selection)),
+                           ToTorchFormatTensor(div=(args.arch not in ['BNInception', 'InceptionV3'])),
                            normalize,
                        ]), dense_sample=args.dense_sample),
             batch_size=args.batch_size, shuffle=False,
             num_workers=args.workers, pin_memory=True)
     else:
         train_loader = torch.utils.data.DataLoader(
-            TSNDataSet(args.root_path, args.train_list, num_segments=args.num_segments,
+            TSNDataSet(args.dataset, args.root_path, args.train_list, num_segments=args.num_segments,
                        new_length=data_length,
                        modality=args.modality,
                        image_tmpl=prefix,
@@ -191,7 +187,7 @@ def main():
                            train_augmentation,
                            Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
                            ToTorchFormatTensor(
-                               div=(args.arch not in ['BNInception', 'InceptionV3'] and not args.freq_selection)),
+                               div=(args.arch not in ['BNInception', 'InceptionV3'])),
                            normalize,
                        ]), dense_sample=args.dense_sample),
             batch_size=args.batch_size, shuffle=True,
@@ -199,7 +195,7 @@ def main():
             drop_last=True)  # prevent something not % n_GPU
 
         val_loader = torch.utils.data.DataLoader(
-            TSNDataSet(args.root_path, args.val_list, num_segments=args.num_segments,
+            TSNDataSet(args.dataset, args.root_path, args.val_list, num_segments=args.num_segments,
                        new_length=data_length,
                        modality=args.modality,
                        image_tmpl=prefix,
@@ -209,7 +205,7 @@ def main():
                            GroupCenterCrop(crop_size),
                            Stack(roll=(args.arch in ['BNInception', 'InceptionV3'])),
                            ToTorchFormatTensor(
-                               div=(args.arch not in ['BNInception', 'InceptionV3'] and not args.freq_selection)),
+                               div=(args.arch not in ['BNInception', 'InceptionV3'])),
                            normalize,
                        ]), dense_sample=args.dense_sample),
             batch_size=args.batch_size, shuffle=False,
@@ -226,7 +222,7 @@ def main():
             group['name'], len(group['params']), group['lr_mult'], group['decay_mult'])))
 
     if args.evaluate:
-        validate(val_loader, model, criterion, None)
+        validate(val_loader, model, criterion, 0)
         return
 
     log_training = open(os.path.join(args.root_log, args.store_name, 'log.csv'), 'w')
@@ -270,8 +266,6 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
     losses = AverageMeter()
     top1 = AverageMeter()
     top5 = AverageMeter()
-    if args.freq_selection:
-        selected_freqs = AverageMeter()
 
     if args.no_partialbn:
         model.module.partialBN(False)
@@ -291,21 +285,14 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
         target_var = torch.autograd.Variable(target)
 
         # compute output
-        output, r_t = model(input_var, epoch, args.warm_up_epoch)
+        output = model(input_var)
         loss = criterion(output, target_var)
-        if args.freq_selection:
-            if epoch >= args.warm_up_epoch:
-                selected_freq = torch.mean(r_t[:, 1, :].sum(dim=1))
-            else:
-                selected_freq = torch.tensor(args.num_segments)
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
         losses.update(loss.item(), input.size(0))
         top1.update(prec1.item(), input.size(0))
         top5.update(prec5.item(), input.size(0))
-        if args.freq_selection:
-            selected_freqs.update(selected_freq.item(), input.size(0))
 
         # compute gradient and do SGD step
         loss.backward()
@@ -321,26 +308,15 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
         end = time.time()
 
         if i % args.print_freq == 0:
-            if args.freq_selection:
-                output = ('Epoch: [{0}][{1}/{2}], lr: {lr:.5f}\t'
-                          'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                          'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                          'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                          '#Freqs {selected_freqs.val:.4f} ({selected_freqs.avg:.4f})\t'
-                          'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                          'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                    epoch, i, len(train_loader), batch_time=batch_time,
-                    data_time=data_time, loss=losses, selected_freqs=selected_freqs, top1=top1, top5=top5,
-                    lr=optimizer.param_groups[-1]['lr'] * 0.1))
-            else:
-                output = ('Epoch: [{0}][{1}/{2}], lr: {lr:.5f}\t'
-                          'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                          'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                          'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                          'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                          'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                    epoch, i, len(train_loader), batch_time=batch_time,
-                    data_time=data_time, loss=losses, top1=top1, top5=top5, lr=optimizer.param_groups[-1]['lr'] * 0.1))
+
+            output = ('Epoch: [{0}][{1}/{2}], lr: {lr:.5f}\t'
+                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                      'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                      'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                epoch, i, len(train_loader), batch_time=batch_time,
+                data_time=data_time, loss=losses, top1=top1, top5=top5, lr=optimizer.param_groups[-1]['lr'] * 0.1))
             print(output)
             log.write(output + '\n')
             log.flush()
@@ -349,8 +325,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
     tf_writer.add_scalar('acc/train_top1', top1.avg, epoch)
     tf_writer.add_scalar('acc/train_top5', top5.avg, epoch)
     tf_writer.add_scalar('lr', optimizer.param_groups[-1]['lr'], epoch)
-    if args.freq_selection:
-        tf_writer.add_scalar('selected_freqs/train', selected_freqs.avg, epoch)
+
 
 
 def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
@@ -358,8 +333,6 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
     losses = AverageMeter()
     top1 = AverageMeter()
     top5 = AverageMeter()
-    if args.freq_selection:
-        selected_freqs = AverageMeter()
 
     all_results = []
     all_targets = []
@@ -373,13 +346,8 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
             target = target.cuda()
 
             # compute output
-            output, r_t = model(input, epoch, args.warm_up_epoch)
+            output = model(input)
             loss = criterion(output, target)
-            if args.freq_selection:
-                if epoch >= args.warm_up_epoch:
-                    selected_freq = torch.mean(r_t[:, 1, :].sum(dim=1))
-                else:
-                    selected_freq = torch.tensor(args.num_segments)
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
@@ -387,8 +355,6 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
             losses.update(loss.item(), input.size(0))
             top1.update(prec1.item(), input.size(0))
             top5.update(prec5.item(), input.size(0))
-            if args.freq_selection:
-                selected_freqs.update(selected_freq.item(), input.size(0))
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -398,39 +364,24 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
             all_targets.append(target)
 
             if i % args.print_freq == 0:
-                if args.freq_selection:
-                    output = ('Test: [{0}/{1}]\t'
-                              'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                              'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                              '#Freqs {selected_freqs.val:.4f} ({selected_freqs.avg:.4f})\t'
-                              'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                              'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                        i, len(val_loader), batch_time=batch_time, loss=losses,
-                        selected_freqs=selected_freqs, top1=top1, top5=top5))
-                else:
-                    output = ('Test: [{0}/{1}]\t'
-                              'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                              'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                              'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                              'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                        i, len(val_loader), batch_time=batch_time, loss=losses,
-                        top1=top1, top5=top5))
+
+                output = ('Test: [{0}/{1}]\t'
+                          'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                          'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                          'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                          'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                    i, len(val_loader), batch_time=batch_time, loss=losses,
+                    top1=top1, top5=top5))
                 print(output)
                 if log is not None:
                     log.write(output + '\n')
                     log.flush()
 
     mAP, _ = cal_map(torch.cat(all_results, 0).cpu(), torch.cat(all_targets, 0).unsqueeze(1).cpu())
-    if args.freq_selection:
-        output = ('Testing Results: mAP {mAP:.3f} Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} '
-                  'Loss {loss.avg:.5f} #Freq {selected_freqs.avg:.3f} Time {time:.3f}'
-                  .format(mAP=mAP, top1=top1, top5=top5,
-                          loss=losses, selected_freqs=selected_freqs, time=batch_time.avg * len(val_loader)))
-    else:
-        output = ('Testing Results: mAP {mAP:.3f} Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} '
-                  'Loss {loss.avg:.5f} Time {time:.3f}'
-                  .format(mAP=mAP, top1=top1, top5=top5,
-                          loss=losses, time=batch_time.avg * len(val_loader)))
+    output = ('Testing Results: mAP {mAP:.3f} Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} '
+              'Loss {loss.avg:.5f} Time {time:.3f}'
+              .format(mAP=mAP, top1=top1, top5=top5,
+                      loss=losses, time=batch_time.avg * len(val_loader)))
     print(output)
     if log is not None:
         log.write(output + '\n')
@@ -440,8 +391,6 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
         tf_writer.add_scalar('loss/test', losses.avg, epoch)
         tf_writer.add_scalar('acc/test_top1', top1.avg, epoch)
         tf_writer.add_scalar('acc/test_top5', top5.avg, epoch)
-        if args.freq_selection:
-            tf_writer.add_scalar('selected_freqs/test', selected_freqs.avg, epoch)
 
     return top1.avg
 

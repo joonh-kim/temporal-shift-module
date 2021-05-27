@@ -29,12 +29,12 @@ class VideoRecord(object):
 
 
 class TSNDataSet(data.Dataset):
-    def __init__(self, root_path, list_file,
+    def __init__(self, dataset, root_path, list_file,
                  num_segments=3, new_length=1, modality='RGB',
                  image_tmpl='img_{:05d}.jpg', transform=None,
                  random_shift=True, test_mode=False,
                  remove_missing=False, dense_sample=False, twice_sample=False):
-
+        self.dataset = dataset
         self.root_path = root_path
         self.list_file = list_file
         self.num_segments = num_segments
@@ -93,8 +93,10 @@ class TSNDataSet(data.Dataset):
 
     def _parse_list(self):
         # check the frame number is large >3:
-        # tmp = [x.strip().split(',') for x in open(self.list_file)]
-        tmp = [x.strip().split(' ') for x in open(self.list_file)]
+        if self.dataset == 'minikinetics':
+            tmp = [x.strip().split(',') for x in open(self.list_file)]
+        else:
+            tmp = [x.strip().split(' ') for x in open(self.list_file)]
         if not self.test_mode or self.remove_missing:
             tmp = [item for item in tmp if int(item[1]) >= 3]
         self.video_list = [VideoRecord(item) for item in tmp]
