@@ -9,6 +9,8 @@ from ops.basic_ops import ConsensusModule
 from ops.transforms import *
 from torch.nn.init import normal_, constant_
 
+from ops.FT_base_model import resnet50
+
 import torch.nn.functional as F
 
 class TSN(nn.Module):
@@ -18,7 +20,8 @@ class TSN(nn.Module):
                  dropout=0.8, img_feature_dim=256,
                  crop_num=1, partial_bn=True, print_spec=True, pretrain='imagenet',
                  is_shift=False, shift_div=8, shift_place='blockres', fc_lr5=False,
-                 temporal_pool=False, non_local=False):
+                 temporal_pool=False, non_local=False,
+                 fourier=False):
         super(TSN, self).__init__()
         self.modality = modality
         self.num_segments = num_segments
@@ -37,6 +40,8 @@ class TSN(nn.Module):
         self.fc_lr5 = fc_lr5
         self.temporal_pool = temporal_pool
         self.non_local = non_local
+
+        self.fourier = fourier
 
         if not before_softmax and consensus_type != 'avg':
             raise ValueError("Only avg consensus can be used after Softmax")
@@ -105,17 +110,28 @@ class TSN(nn.Module):
         print('=> base model: {}'.format(base_model))
 
         if 'resnet' in base_model:
-            self.base_model = getattr(torchvision.models, base_model)(True if self.pretrain == 'imagenet' else False)
-            if self.is_shift:
-                print('Adding temporal shift...')
-                from ops.temporal_shift import make_temporal_shift
-                make_temporal_shift(self.base_model, self.num_segments,
-                                    n_div=self.shift_div, place=self.shift_place, temporal_pool=self.temporal_pool)
+            if self.fourier:
+                self.base_model = resnet50(self.num_segments)
+                if self.pretrain == 'imagenet':
+                    saved_state_dict = torch.utils.model_zoo.load_url(
+                        'https://download.pytorch.org/models/resnet50-19c8e357.pth')
+                    new_params = self.base_model.state_dict().copy()
+                    for i in saved_state_dict:
+                        if i in new_params:
+                            new_params[i] = saved_state_dict[i]
+                    self.base_model.load_state_dict(new_params)
+            else:
+                self.base_model = getattr(torchvision.models, base_model)(True if self.pretrain == 'imagenet' else False)
+                if self.is_shift:
+                    print('Adding temporal shift...')
+                    from ops.temporal_shift import make_temporal_shift
+                    make_temporal_shift(self.base_model, self.num_segments,
+                                        n_div=self.shift_div, place=self.shift_place, temporal_pool=self.temporal_pool)
 
-            if self.non_local:
-                print('Adding non-local module...')
-                from ops.non_local import make_non_local
-                make_non_local(self.base_model, self.num_segments)
+                if self.non_local:
+                    print('Adding non-local module...')
+                    from ops.non_local import make_non_local
+                    make_non_local(self.base_model, self.num_segments)
 
             self.base_model.last_layer_name = 'fc'
             self.input_size = 224
@@ -202,6 +218,7 @@ class TSN(nn.Module):
         lr5_weight = []
         lr10_bias = []
         bn = []
+        gn = []
         custom_ops = []
 
         conv_cnt = 0
@@ -243,6 +260,9 @@ class TSN(nn.Module):
                 if not self._enable_pbn or bn_cnt == 1:
                     bn.extend(list(m.parameters()))
 
+            elif isinstance(m, torch.nn.GroupNorm):
+                gn.extend(list(m.parameters()))
+
             elif len(m._modules) == 0:
                 if len(list(m.parameters())) > 0:
                     raise ValueError("New atomic module type: {}. Need to give it a learning policy".format(type(m)))
@@ -258,6 +278,8 @@ class TSN(nn.Module):
              'name': "normal_bias"},
             {'params': bn, 'lr_mult': 1, 'decay_mult': 0,
              'name': "BN scale/shift"},
+            {'params': gn, 'lr_mult': 1, 'decay_mult': 0,
+             'name': "GN scale/shift"},
             {'params': custom_ops, 'lr_mult': 1, 'decay_mult': 1,
              'name': "custom_ops"},
             # for fc

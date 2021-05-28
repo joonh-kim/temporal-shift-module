@@ -19,20 +19,20 @@ from torch.nn import functional as F
 
 # options
 parser = argparse.ArgumentParser(description="TSM testing on the full validation set")
-parser.add_argument('dataset', type=str)
+parser.add_argument('dataset', type=str, default="somethingv2")
 
 # may contain splits
 parser.add_argument('--weights', type=str, default=None)
-parser.add_argument('--test_segments', type=str, default=25)
+parser.add_argument('--test_segments', type=str, default=8)
 parser.add_argument('--dense_sample', default=False, action="store_true", help='use dense sample as I3D')
-parser.add_argument('--twice_sample', default=False, action="store_true", help='use twice sample for ensemble')
+parser.add_argument('--twice_sample', default=True, action="store_true", help='use twice sample for ensemble')
 parser.add_argument('--full_res', default=False, action="store_true",
                     help='use full resolution 256x256 for test as in Non-local I3D')
 
-parser.add_argument('--test_crops', type=int, default=1)
+parser.add_argument('--test_crops', type=int, default=3)
 parser.add_argument('--coeff', type=str, default=None)
-parser.add_argument('--batch_size', type=int, default=1)
-parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
+parser.add_argument('--batch_size', type=int, default=36)
+parser.add_argument('-j', '--workers', default=24, type=int, metavar='N',
                     help='number of data loading workers (default: 8)')
 
 # for true test
@@ -46,7 +46,7 @@ parser.add_argument('--input_size', type=int, default=224)
 parser.add_argument('--crop_fusion_type', type=str, default='avg')
 parser.add_argument('--gpus', nargs='+', type=int, default=None)
 parser.add_argument('--img_feature_dim',type=int, default=256)
-parser.add_argument('--num_set_segments',type=int, default=1,help='TODO: select multiply set of n-frames from a video')
+parser.add_argument('--num_set_segments',type=int, default=1, help='TODO: select multiply set of n-frames from a video')
 parser.add_argument('--pretrain', type=str, default='imagenet')
 
 args = parser.parse_args()
@@ -174,7 +174,7 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
         raise ValueError("Only 1, 5, 10 crops are supported while we got {}".format(args.test_crops))
 
     data_loader = torch.utils.data.DataLoader(
-            TSNDataSet(root_path, test_file if test_file is not None else val_list, num_segments=this_test_segments,
+            TSNDataSet(dataset, root_path, test_file if test_file is not None else val_list, num_segments=this_test_segments,
                        new_length=1 if modality == "RGB" else 5,
                        modality=modality,
                        image_tmpl=prefix,

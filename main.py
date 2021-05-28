@@ -41,6 +41,8 @@ def main():
     full_arch_name = args.arch
     if args.shift:
         full_arch_name += '_shift{}_{}'.format(args.shift_div, args.shift_place)
+    if args.fourier:
+        full_arch_name += '_FT'
     if args.temporal_pool:
         full_arch_name += '_tpool'
     args.store_name = '_'.join(
@@ -70,7 +72,8 @@ def main():
                 is_shift=args.shift, shift_div=args.shift_div, shift_place=args.shift_place,
                 fc_lr5=not (args.tune_from and args.dataset in args.tune_from),
                 temporal_pool=args.temporal_pool,
-                non_local=args.non_local)
+                non_local=args.non_local,
+                fourier=args.fourier)
 
     crop_size = model.crop_size
     scale_size = model.scale_size
