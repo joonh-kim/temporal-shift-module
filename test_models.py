@@ -45,8 +45,8 @@ parser.add_argument('--max_num', type=int, default=-1)
 parser.add_argument('--input_size', type=int, default=224)
 parser.add_argument('--crop_fusion_type', type=str, default='avg')
 parser.add_argument('--gpus', nargs='+', type=int, default=None)
-parser.add_argument('--img_feature_dim',type=int, default=256)
-parser.add_argument('--num_set_segments',type=int, default=1, help='TODO: select multiply set of n-frames from a video')
+parser.add_argument('--img_feature_dim', type=int, default=256)
+parser.add_argument('--num_set_segments', type=int, default=1, help='TODO: select multiply set of n-frames from a video')
 parser.add_argument('--pretrain', type=str, default='imagenet')
 
 args = parser.parse_args()
@@ -132,7 +132,7 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
               pretrain=args.pretrain,
               is_shift=is_shift, shift_div=shift_div, shift_place=shift_place,
               non_local='_nl' in this_weights,
-              )
+              fourier=args.fourier)
 
     if 'tpool' in this_weights:
         from ops.temporal_shift import make_temporal_pool
@@ -173,8 +173,10 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
     else:
         raise ValueError("Only 1, 5, 10 crops are supported while we got {}".format(args.test_crops))
 
-    data_loader = torch.utils.data.DataLoader(
-            TSNDataSet(args.dataset, root_path, test_file if test_file is not None else val_list, num_segments=this_test_segments,
+    if args.dataset == 'minikinetics':
+        data_loader = torch.utils.data.DataLoader(
+            TSNDataSet(args.dataset, root_path + '/val/', test_file if test_file is not None else val_list,
+                       num_segments=this_test_segments,
                        new_length=1 if modality == "RGB" else 5,
                        modality=modality,
                        image_tmpl=prefix,
@@ -188,7 +190,24 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
                        ]), dense_sample=args.dense_sample, twice_sample=args.twice_sample),
             batch_size=args.batch_size, shuffle=False,
             num_workers=args.workers, pin_memory=True,
-    )
+        )
+    else:
+        data_loader = torch.utils.data.DataLoader(
+                TSNDataSet(args.dataset, root_path, test_file if test_file is not None else val_list, num_segments=this_test_segments,
+                           new_length=1 if modality == "RGB" else 5,
+                           modality=modality,
+                           image_tmpl=prefix,
+                           test_mode=True,
+                           remove_missing=len(weights_list) == 1,
+                           transform=torchvision.transforms.Compose([
+                               cropping,
+                               Stack(roll=(this_arch in ['BNInception', 'InceptionV3'])),
+                               ToTorchFormatTensor(div=(this_arch not in ['BNInception', 'InceptionV3'])),
+                               GroupNormalize(net.input_mean, net.input_std),
+                           ]), dense_sample=args.dense_sample, twice_sample=args.twice_sample),
+                batch_size=args.batch_size, shuffle=False,
+                num_workers=args.workers, pin_memory=True,
+        )
 
     if args.gpus is not None:
         devices = [args.gpus[i] for i in range(args.workers)]
@@ -231,7 +250,7 @@ def eval_video(video_data, net, this_test_segments, modality):
         elif modality == 'RGBDiff':
             length = 18
         else:
-            raise ValueError("Unknown modality "+ modality)
+            raise ValueError("Unknown modality " + modality)
 
         data_in = data.view(-1, length, data.size(2), data.size(3))
         if is_shift:
