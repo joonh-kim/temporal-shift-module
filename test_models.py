@@ -174,7 +174,7 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
         raise ValueError("Only 1, 5, 10 crops are supported while we got {}".format(args.test_crops))
 
     data_loader = torch.utils.data.DataLoader(
-            TSNDataSet(dataset, root_path, test_file if test_file is not None else val_list, num_segments=this_test_segments,
+            TSNDataSet(args.dataset, root_path, test_file if test_file is not None else val_list, num_segments=this_test_segments,
                        new_length=1 if modality == "RGB" else 5,
                        modality=modality,
                        image_tmpl=prefix,

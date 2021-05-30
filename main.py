@@ -84,7 +84,11 @@ def main():
 
     model = torch.nn.DataParallel(model, device_ids=args.gpus).cuda()
 
-    optimizer = torch.optim.SGD(policies,
+    if args.pretrain == 'scratch':
+        optimizer = torch.optim.SGD(model.module.parameters(),
+                                    lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    else:
+        optimizer = torch.optim.SGD(policies,
                                 args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
@@ -220,9 +224,10 @@ def main():
     else:
         raise ValueError("Unknown loss type")
 
-    for group in policies:
-        print(('group: {} has {} params, lr_mult: {}, decay_mult: {}'.format(
-            group['name'], len(group['params']), group['lr_mult'], group['decay_mult'])))
+    if args.pretrain == 'imagenet':
+        for group in policies:
+            print(('group: {} has {} params, lr_mult: {}, decay_mult: {}'.format(
+                group['name'], len(group['params']), group['lr_mult'], group['decay_mult'])))
 
     if args.evaluate:
         validate(val_loader, model, criterion, 0)
@@ -233,7 +238,7 @@ def main():
         f.write(str(args))
     tf_writer = SummaryWriter(log_dir=os.path.join(args.root_log, args.store_name))
     for epoch in range(args.start_epoch, args.epochs):
-        adjust_learning_rate(optimizer, epoch, args.lr_type, args.lr_steps)
+        adjust_learning_rate(optimizer, epoch, args.lr_type, args.lr_steps, args.pretrain)
 
         # train for one epoch
         train(train_loader, model, criterion, optimizer, epoch, log_training, tf_writer)
@@ -405,21 +410,26 @@ def save_checkpoint(state, is_best):
         shutil.copyfile(filename, filename.replace('pth.tar', 'best.pth.tar'))
 
 
-def adjust_learning_rate(optimizer, epoch, lr_type, lr_steps):
-    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    if lr_type == 'step':
-        decay = 0.1 ** (sum(epoch >= np.array(lr_steps)))
-        lr = args.lr * decay
-        decay = args.weight_decay
-    elif lr_type == 'cos':
+def adjust_learning_rate(optimizer, epoch, lr_type, lr_steps, pretrain):
+    if pretrain == 'scratch':
         import math
         lr = 0.5 * args.lr * (1 + math.cos(math.pi * epoch / args.epochs))
-        decay = args.weight_decay
+        optimizer.param_groups[0]['lr'] = lr
     else:
-        raise NotImplementedError
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr * param_group['lr_mult']
-        param_group['weight_decay'] = decay * param_group['decay_mult']
+        """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
+        if lr_type == 'step':
+            decay = 0.1 ** (sum(epoch >= np.array(lr_steps)))
+            lr = args.lr * decay
+            decay = args.weight_decay
+        elif lr_type == 'cos':
+            import math
+            lr = 0.5 * args.lr * (1 + math.cos(math.pi * epoch / args.epochs))
+            decay = args.weight_decay
+        else:
+            raise NotImplementedError
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr * param_group['lr_mult']
+            param_group['weight_decay'] = decay * param_group['decay_mult']
 
 
 def check_rootfolders():

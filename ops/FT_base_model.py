@@ -47,7 +47,7 @@ class Bottleneck(nn.Module):
         x = x.view(n_batch, self.num_segments, c, h, w)
 
         # TODO: fft
-        x_ft = torch.fft.fft(x, dim=1).real
+        x_ft = torch.fft.fftn(x, dim=[1, 2, 3, 4]).real
 
         x_res = x_ft + x
         x = self.ln(x_res)
