@@ -21,7 +21,7 @@ class TSN(nn.Module):
                  crop_num=1, partial_bn=True, print_spec=True, pretrain='imagenet',
                  is_shift=False, shift_div=8, shift_place='blockres', fc_lr5=False,
                  temporal_pool=False, non_local=False,
-                 fourier=False):
+                 fourier=False, pos_enc=False):
         super(TSN, self).__init__()
         self.modality = modality
         self.num_segments = num_segments
@@ -42,6 +42,7 @@ class TSN(nn.Module):
         self.non_local = non_local
 
         self.fourier = fourier
+        self.pos_enc = pos_enc
 
         if not before_softmax and consensus_type != 'avg':
             raise ValueError("Only avg consensus can be used after Softmax")
@@ -111,7 +112,10 @@ class TSN(nn.Module):
 
         if 'resnet' in base_model:
             if self.fourier:
-                self.base_model = resnet50(self.num_segments)
+                if self.pos_enc:
+                    self.base_model = resnet50(self.num_segments, 4)
+                else:
+                    self.base_model = resnet50(self.num_segments, 3)
                 if self.pretrain == 'imagenet':
                     saved_state_dict = torch.utils.model_zoo.load_url(
                         'https://download.pytorch.org/models/resnet50-19c8e357.pth')
@@ -298,6 +302,19 @@ class TSN(nn.Module):
             if self.modality == 'RGBDiff':
                 sample_len = 3 * self.new_length
                 input = self._get_diff(input)
+
+            if self.pos_enc:
+                sample_len = 4
+                n, tc, h, w = input.size()
+                c = tc // self.num_segments
+                input = input.view(n, self.num_segments, c, h, w)
+
+                position = torch.cat((torch.arange(-1, 1, 2/(self.num_segments - 1)), torch.ones(1))).cuda()
+                position = position.repeat(n, 1).repeat(1, h*w).view(n, h*w, self.num_segments).transpose(1, 2)
+                position = position.view(n, self.num_segments, 1, h, w)
+
+                input = torch.cat((input, position), dim=2)
+                input = input.view(n, self.num_segments * (c + 1), h, w)
 
             base_out = self.base_model(input.view((-1, sample_len) + input.size()[-2:]))
         else:

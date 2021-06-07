@@ -45,6 +45,8 @@ def main():
         full_arch_name += '_FT'
     if args.temporal_pool:
         full_arch_name += '_tpool'
+    if args.pos_enc:
+        full_arch_name += '_PE'
     args.store_name = '_'.join(
         ['TSM', args.dataset, args.modality, full_arch_name, args.consensus_type, 'segment%d' % args.num_segments,
          'e{}'.format(args.epochs)])
@@ -73,7 +75,8 @@ def main():
                 fc_lr5=not (args.tune_from and args.dataset in args.tune_from),
                 temporal_pool=args.temporal_pool,
                 non_local=args.non_local,
-                fourier=args.fourier)
+                fourier=args.fourier,
+                pos_enc=args.pos_enc)
 
     crop_size = model.crop_size
     scale_size = model.scale_size

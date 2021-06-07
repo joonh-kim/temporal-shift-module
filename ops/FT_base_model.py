@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from ops.dct import *
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
@@ -47,7 +48,13 @@ class Bottleneck(nn.Module):
         x = x.view(n_batch, self.num_segments, c, h, w)
 
         # TODO: fft
+        # x_ft = torch.sqrt(torch.fft.fftn(x, dim=[1, 2, 3, 4]).real.square()
+        #                   + torch.fft.fftn(x, dim=[1, 2, 3, 4]).imag.square())
+
         x_ft = torch.fft.fftn(x, dim=[1, 2, 3, 4]).real
+
+        # x_ft = dct_3d(x.transpose(1, 2), norm='ortho')
+        # x_ft = x_ft.transpose(1, 2)
 
         x_res = x_ft + x
         x = self.ln(x_res)
@@ -80,7 +87,7 @@ class ResNet(nn.Module):
 
     def __init__(self, block, layers, num_classes=1000, zero_init_residual=False,
                  groups=1, width_per_group=64, replace_stride_with_dilation=None,
-                 norm_layer=None, num_segments=1):
+                 norm_layer=None, num_segments=1, first_channel=3):
         super(ResNet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -99,7 +106,7 @@ class ResNet(nn.Module):
                              "or a 3-element tuple, got {}".format(replace_stride_with_dilation))
         self.groups = groups
         self.base_width = width_per_group
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
+        self.conv1 = nn.Conv2d(first_channel, self.inplanes, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
@@ -178,11 +185,10 @@ class ResNet(nn.Module):
     def forward(self, x):
         return self._forward_impl(x)
 
-
-def resnet50(num_segments, **kwargs):
+def resnet50(num_segments, first_channel, **kwargs):
     r"""ResNet-50 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
     """
-    model = ResNet(Bottleneck, [3, 4, 6, 3], num_segments=num_segments, **kwargs)
+    model = ResNet(Bottleneck, [3, 4, 6, 3], num_segments=num_segments, first_channel=first_channel, **kwargs)
 
     return model
