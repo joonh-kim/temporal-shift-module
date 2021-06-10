@@ -53,8 +53,7 @@ class Bottleneck(nn.Module):
 
         x_ft = torch.fft.fftn(x, dim=[1, 2, 3, 4]).real
 
-        # x_ft = dct_3d(x.transpose(1, 2), norm='ortho')
-        # x_ft = x_ft.transpose(1, 2)
+        # x_ft = dct_4d(x, norm='ortho')
 
         x_res = x_ft + x
         x = self.ln(x_res)
