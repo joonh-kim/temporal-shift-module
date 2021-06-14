@@ -262,7 +262,10 @@ def eval_video(video_data, net, this_test_segments, modality):
 
         data_in = data.view(-1, length, data.size(2), data.size(3))
         if is_shift or is_FT:
-            data_in = data_in.view(batch_size * num_crop, this_test_segments, length, data_in.size(2), data_in.size(3))
+            if not is_PE:
+                data_in = data_in.view(batch_size * num_crop, this_test_segments, length, data_in.size(2), data_in.size(3))
+            else:
+                data_in = data_in.view(batch_size * num_crop, this_test_segments * length, data_in.size(2), data_in.size(3))
         rst = net(data_in)
         rst = rst.reshape(batch_size, num_crop, -1).mean(1)
 
