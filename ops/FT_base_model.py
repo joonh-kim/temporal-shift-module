@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from ops.dct import *
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
@@ -14,11 +15,12 @@ def conv1x1(in_planes, out_planes, stride=1):
 def Att(x1, x2):
     assert torch.equal(x1, x2)
     n, t, c, h, w = x1.size()
-    x1_mean, x2_mean = x1.mean(dim=[1, 2]), x2.mean(dim=[1, 2])
-    score = torch.bmm(x1_mean, x2_mean.transpose(1, 2)) / c.sqrt()
-    score = F.softmax(score, dim=1)
+    x1_mean, x2_mean = x1.mean(dim=[-2, -1]), x2.mean(dim=[-2, -1])
+    import math
+    score = torch.bmm(x1_mean, x2_mean.transpose(1, 2)) / math.sqrt(c)
+    score = F.softmax(score, dim=2)
     x1 = x1.unsqueeze(2).expand(-1, -1, t, -1, -1, -1)
-    x = x1 * score.expand_as(x1)
+    x = x1 * score.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
     return x.sum(dim=2)
 
 
