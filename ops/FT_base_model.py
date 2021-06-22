@@ -7,10 +7,20 @@ def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                      padding=dilation, groups=groups, bias=False, dilation=dilation)
 
-
 def conv1x1(in_planes, out_planes, stride=1):
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
+
+def Att(x1, x2):
+    assert torch.equal(x1, x2)
+    n, t, c, h, w = x1.size()
+    x1_mean, x2_mean = x1.mean(dim=[1, 2]), x2.mean(dim=[1, 2])
+    score = torch.bmm(x1_mean, x2_mean.transpose(1, 2)) / c.sqrt()
+    score = F.softmax(score, dim=1)
+    x1 = x1.unsqueeze(2).expand(-1, -1, t, -1, -1, -1)
+    x = x1 * score.expand_as(x1)
+    return x.sum(dim=2)
+
 
 class Bottleneck(nn.Module):
     # Bottleneck in torchvision places the stride for downsampling at 3x3 convolution(self.conv2)
@@ -54,6 +64,8 @@ class Bottleneck(nn.Module):
         x_ft = torch.fft.fftn(x, dim=[1, 2, 3, 4]).real
 
         # x_ft = dct_4d(x, norm='ortho')
+        
+        x_ft = Att(x_ft, x)
 
         x_res = x_ft + x
         x = self.ln(x_res)
