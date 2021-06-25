@@ -13,7 +13,7 @@ def conv1x1(in_planes, out_planes, stride=1):
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
 def Att(x1, x2):
-    assert torch.equal(x1, x2)
+    assert [*x1.size()] == [*x2.size()]
     n, t, c, h, w = x1.size()
     x1_mean, x2_mean = x1.mean(dim=[-2, -1]), x2.mean(dim=[-2, -1])
     import math
