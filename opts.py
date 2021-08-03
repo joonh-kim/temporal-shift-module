@@ -14,6 +14,7 @@ parser.add_argument('--root_path', type=str, default="")
 # ========================= Model Configs ==========================
 parser.add_argument('--arch', type=str, default="resnet50")
 parser.add_argument('--num_segments', type=int, default=8)
+parser.add_argument('--num_neighbors', type=int, default=4)
 parser.add_argument('--consensus_type', type=str, default='avg')
 parser.add_argument('--k', type=int, default=3)
 
@@ -23,19 +24,19 @@ parser.add_argument('--loss_type', type=str, default="nll",
                     choices=['nll'])
 parser.add_argument('--img_feature_dim', default=256, type=int, help="the feature dimension for each frame")
 parser.add_argument('--suffix', type=str, default=None)
-parser.add_argument('--pretrain', type=str, default='scratch', help='imagenet, scratch')
+parser.add_argument('--pretrain', type=str, default='imagenet', help='imagenet, scratch')
 parser.add_argument('--tune_from', type=str, default=None, help='fine-tune from checkpoint')
 
 # ========================= Learning Configs ==========================
-parser.add_argument('--epochs', default=196, type=int, metavar='N',
+parser.add_argument('--epochs', default=100, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('-b', '--batch-size', default=4, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
-parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--lr_type', default='step', type=str,
                     metavar='LRtype', help='learning rate type')
-parser.add_argument('--lr_steps', default=[20, 40], type=float, nargs="+",
+parser.add_argument('--lr_steps', default=[30, 60, 90], type=float, nargs="+",
                     metavar='LRSteps', help='epochs to decay learning rate by 10')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
@@ -43,7 +44,7 @@ parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 5e-4)')
 parser.add_argument('--clip-gradient', '--gd', default=20, type=float,
                     metavar='W', help='gradient norm clipping (default: disabled)')
-parser.add_argument('--no_partialbn', '--npb', default=True, action="store_true")
+parser.add_argument('--no_partialbn', '--npb', default=False, action="store_true")
 
 # ========================= Monitor Configs ==========================
 parser.add_argument('--print-freq', '-p', default=100, type=int,
@@ -68,9 +69,8 @@ parser.add_argument('--root_log', type=str, default='log')
 parser.add_argument('--root_model', type=str, default='checkpoint')
 
 parser.add_argument('--fourier', default=True, action="store_true", help='use FT for models')
-parser.add_argument('--pos_enc', default=False, action="store_true", help='use PE for inputs')
 
-parser.add_argument('--shift', default=False, action="store_true", help='use shift for models')
+parser.add_argument('--shift', default=True, action="store_true", help='use shift for models')
 parser.add_argument('--shift_div', default=8, type=int, help='number of div for shift (default: 8)')
 parser.add_argument('--shift_place', default='blockres', type=str, help='place for shift (default: stageres)')
 

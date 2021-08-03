@@ -14,17 +14,18 @@ from ops.FT_base_model import resnet50
 import torch.nn.functional as F
 
 class TSN(nn.Module):
-    def __init__(self, num_class, num_segments, modality,
+    def __init__(self, num_class, num_segments, num_neighbors, modality,
                  base_model='resnet101', new_length=None,
                  consensus_type='avg', before_softmax=True,
                  dropout=0.8, img_feature_dim=256,
                  crop_num=1, partial_bn=True, print_spec=True, pretrain='imagenet',
                  is_shift=False, shift_div=8, shift_place='blockres', fc_lr5=False,
                  temporal_pool=False, non_local=False,
-                 fourier=False, pos_enc=False):
+                 fourier=False):
         super(TSN, self).__init__()
         self.modality = modality
         self.num_segments = num_segments
+        self.num_neighbors = num_neighbors
         self.reshape = True
         self.before_softmax = before_softmax
         self.dropout = dropout
@@ -42,7 +43,6 @@ class TSN(nn.Module):
         self.non_local = non_local
 
         self.fourier = fourier
-        self.pos_enc = pos_enc
 
         if not before_softmax and consensus_type != 'avg':
             raise ValueError("Only avg consensus can be used after Softmax")
@@ -112,10 +112,7 @@ class TSN(nn.Module):
 
         if 'resnet' in base_model:
             if self.fourier:
-                if self.pos_enc:
-                    self.base_model = resnet50(self.num_segments, 4)
-                else:
-                    self.base_model = resnet50(self.num_segments, 3)
+                self.base_model = resnet50(self.num_segments, self.num_neighbors, 3)
                 if self.pretrain == 'imagenet':
                     saved_state_dict = torch.utils.model_zoo.load_url(
                         'https://download.pytorch.org/models/resnet50-19c8e357.pth')
@@ -265,9 +262,6 @@ class TSN(nn.Module):
                 if not self._enable_pbn or bn_cnt == 1:
                     bn.extend(list(m.parameters()))
 
-            elif isinstance(m, torch.nn.GroupNorm):
-                gn.extend(list(m.parameters()))
-
             elif len(m._modules) == 0:
                 if len(list(m.parameters())) > 0:
                     raise ValueError("New atomic module type: {}. Need to give it a learning policy".format(type(m)))
@@ -283,8 +277,6 @@ class TSN(nn.Module):
              'name': "normal_bias"},
             {'params': bn, 'lr_mult': 1, 'decay_mult': 0,
              'name': "BN scale/shift"},
-            {'params': gn, 'lr_mult': 1, 'decay_mult': 0,
-             'name': "GN scale/shift"},
             {'params': custom_ops, 'lr_mult': 1, 'decay_mult': 1,
              'name': "custom_ops"},
             # for fc
@@ -304,19 +296,6 @@ class TSN(nn.Module):
                 sample_len = 3 * self.new_length
                 input = self._get_diff(input)
 
-            if self.pos_enc:
-                sample_len = 4
-                n, tc, h, w = input.size()
-                c = tc // self.num_segments
-                input = input.view(n, self.num_segments, c, h, w)
-
-                position = torch.cat((torch.arange(-1, 1, 2/(self.num_segments - 1)), torch.ones(1))).cuda()
-                position = position.repeat(n, 1).repeat(1, h*w).view(n, h*w, self.num_segments).transpose(1, 2)
-                position = position.view(n, self.num_segments, 1, h, w)
-
-                input = torch.cat((input, position), dim=2)
-                input = input.view(n, self.num_segments * (c + 1), h, w)
-
             base_out = self.base_model(input.view((-1, sample_len) + input.size()[-2:]))
         else:
             base_out = self.base_model(input)
@@ -331,7 +310,10 @@ class TSN(nn.Module):
             if self.is_shift and self.temporal_pool:
                 base_out = base_out.view((-1, self.num_segments // 2) + base_out.size()[1:])
             else:
-                base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])
+                if self.fourier:
+                    base_out = base_out.view((-1, self.num_segments//self.num_neighbors) + base_out.size()[1:])
+                else:
+                    base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])
             output = self.consensus(base_out)
             return output.squeeze(1)
 

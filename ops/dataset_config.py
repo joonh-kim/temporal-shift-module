@@ -100,6 +100,7 @@ def return_kinetics(modality):
         raise NotImplementedError('no such modality:' + modality)
     return filename_categories, filename_imglist_train, filename_imglist_val, root_data, prefix
 
+
 def return_minikinetics(modality):
     filename_categories = 200
     if modality == 'RGB':

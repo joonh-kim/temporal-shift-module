@@ -12,17 +12,6 @@ def conv1x1(in_planes, out_planes, stride=1):
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
-def Att(x1, x2):
-    assert [*x1.size()] == [*x2.size()]
-    n, t, c, h, w = x1.size()
-    x1_mean, x2_mean = x1.mean(dim=[-2, -1]), x2.mean(dim=[-2, -1])
-    import math
-    score = torch.bmm(x1_mean, x2_mean.transpose(1, 2)) / math.sqrt(c)
-    score = F.softmax(score, dim=2)
-    x1 = x1.unsqueeze(2).expand(-1, -1, t, -1, -1, -1)
-    x = x1 * score.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-    return x.sum(dim=2)
-
 
 class Bottleneck(nn.Module):
     # Bottleneck in torchvision places the stride for downsampling at 3x3 convolution(self.conv2)
@@ -50,29 +39,7 @@ class Bottleneck(nn.Module):
         self.downsample = downsample
         self.stride = stride
 
-        self.ln = nn.GroupNorm(1, num_segments)
-        self.num_segments = num_segments
-
     def forward(self, x):
-        ##########################
-        nt, c, h, w = x.size()
-        n_batch = nt // self.num_segments
-        x = x.view(n_batch, self.num_segments, c, h, w)
-
-        # TODO: fft
-        # x_ft = torch.sqrt(torch.fft.fftn(x, dim=[1, 2, 3, 4]).real.square()
-        #                   + torch.fft.fftn(x, dim=[1, 2, 3, 4]).imag.square())
-
-        x_ft = torch.fft.fftn(x, dim=[1, 2, 3, 4]).real
-
-        # x_ft = dct_4d(x, norm='ortho')
-        
-        x_ft = Att(x_ft, x)
-
-        x_res = x_ft + x
-        x = self.ln(x_res)
-        x = x.view(nt, c, h, w)        
-        ##########################
 
         identity = x
 
@@ -100,13 +67,14 @@ class ResNet(nn.Module):
 
     def __init__(self, block, layers, num_classes=1000, zero_init_residual=False,
                  groups=1, width_per_group=64, replace_stride_with_dilation=None,
-                 norm_layer=None, num_segments=1, first_channel=3):
+                 norm_layer=None, num_segments=1, num_neighbors=1, first_channel=3):
         super(ResNet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         self._norm_layer = norm_layer
 
         self.num_segments = num_segments
+        self.num_neighbors = num_neighbors
 
         self.inplanes = 64
         self.dilation = 1
@@ -124,6 +92,8 @@ class ResNet(nn.Module):
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.linear1 = nn.Linear(self.num_neighbors - 1, self.num_neighbors - 1)
+        self.linear2 = nn.Linear(self.num_neighbors - 1, 1)
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2,
                                        dilate=replace_stride_with_dilation[0])
@@ -179,6 +149,25 @@ class ResNet(nn.Module):
 
     def _forward_impl(self, x):
         # See note [TorchScript super()]
+        nT, c, h, w = x.size()
+        T = self.num_segments
+        n = nT // T
+
+        t = self.num_neighbors
+
+        x = x.view(n, T//t, t, c, h, w)
+        x_dct = dct(x.permute(0, 1, 3, 4, 5, 2)).permute(0, 1, 5, 2, 3, 4)
+
+        x_spat = x_dct[:, :, 0, :, :, :] / t / 2
+        x_spat = x_spat.view(nT//t, c, h, w)
+
+        x_dct = x_dct[:, :, 1:, :, :, :]
+        x_dct = x_dct.view(nT//t, t-1, c, h, w).permute(0, 2, 3, 4, 1)
+        x_dct = self.relu(self.linear1(x_dct))
+        x_dct = self.linear2(x_dct).squeeze()
+
+        x = x_spat + x_dct
+
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -198,10 +187,11 @@ class ResNet(nn.Module):
     def forward(self, x):
         return self._forward_impl(x)
 
-def resnet50(num_segments, first_channel, **kwargs):
+def resnet50(num_segments, num_neighbors, first_channel, **kwargs):
     r"""ResNet-50 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
     """
-    model = ResNet(Bottleneck, [3, 4, 6, 3], num_segments=num_segments, first_channel=first_channel, **kwargs)
+    model = ResNet(Bottleneck, [3, 4, 6, 3], num_segments=num_segments, num_neighbors=num_neighbors,
+                   first_channel=first_channel, **kwargs)
 
     return model
