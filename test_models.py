@@ -23,7 +23,8 @@ parser.add_argument('dataset', type=str, default="somethingv2")
 
 # may contain splits
 parser.add_argument('--weights', type=str, default='checkpoint/ckpt.best.pth.tar')
-parser.add_argument('--test_segments', type=str, default=8)
+parser.add_argument('--test_segments', type=str, default=32)
+parser.add_argument('--test_neighbors', type=str, default=4)
 parser.add_argument('--dense_sample', default=False, action="store_true", help='use dense sample as I3D')
 parser.add_argument('--twice_sample', default=True, action="store_true", help='use twice sample for ensemble')
 parser.add_argument('--full_res', default=False, action="store_true",
@@ -31,7 +32,7 @@ parser.add_argument('--full_res', default=False, action="store_true",
 
 parser.add_argument('--test_crops', type=int, default=3)
 parser.add_argument('--coeff', type=str, default=None)
-parser.add_argument('--batch_size', type=int, default=36)
+parser.add_argument('--batch_size', type=int, default=16)
 parser.add_argument('-j', '--workers', default=24, type=int, metavar='N',
                     help='number of data loading workers (default: 8)')
 
@@ -120,10 +121,6 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
         is_FT = True
     else:
         is_FT = False
-    if 'PE' in this_weights:
-        is_PE = True
-    else:
-        is_PE = False
     if 'RGB' in this_weights:
         modality = 'RGB'
     else:
@@ -133,14 +130,14 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
     num_class, args.train_list, val_list, root_path, prefix = dataset_config.return_dataset(args.dataset,
                                                                                             modality)
     print('=> shift: {}, shift_div: {}, shift_place: {}'.format(is_shift, shift_div, shift_place))
-    net = TSN(num_class, this_test_segments if is_shift or is_FT else 1, modality,
+    net = TSN(num_class, this_test_segments if is_shift or is_FT else 1, args.test_neighbors, modality,
               base_model=this_arch,
               consensus_type=args.crop_fusion_type,
               img_feature_dim=args.img_feature_dim,
               pretrain=args.pretrain,
               is_shift=is_shift, shift_div=shift_div, shift_place=shift_place,
               non_local='_nl' in this_weights,
-              fourier=is_FT, pos_enc=is_PE)
+              fourier=is_FT)
 
     if 'tpool' in this_weights:
         from ops.temporal_shift import make_temporal_pool
@@ -262,10 +259,7 @@ def eval_video(video_data, net, this_test_segments, modality):
 
         data_in = data.view(-1, length, data.size(2), data.size(3))
         if is_shift or is_FT:
-            if not is_PE:
-                data_in = data_in.view(batch_size * num_crop, this_test_segments, length, data_in.size(2), data_in.size(3))
-            else:
-                data_in = data_in.view(batch_size * num_crop, this_test_segments * length, data_in.size(2), data_in.size(3))
+            data_in = data_in.view(batch_size * num_crop, this_test_segments * length, data_in.size(2), data_in.size(3))
         rst = net(data_in)
         rst = rst.reshape(batch_size, num_crop, -1).mean(1)
 
@@ -357,5 +351,3 @@ print('upper bound: {}'.format(upper))
 print('-----Evaluation is finished------')
 print('Class Accuracy {:.02f}%'.format(np.mean(cls_acc) * 100))
 print('Overall Prec@1 {:.02f}% Prec@5 {:.02f}%'.format(top1.avg, top5.avg))
-
-

@@ -184,3 +184,16 @@ def idct_4d(X, norm=None):
     x3 = idct(x2.transpose(-1, -3), norm=norm)
     x4 = idct(x3.transpose(-1, -4), norm=norm)
     return x4.transpose(-1, -4).transpose(-1, -3).transpose(-1, -2)
+
+if __name__ == '__main__':
+    x = torch.randn(5)
+    x1 = dct(x)
+    x2 = dct(x * -1)
+    x3 = dct(x * -2)
+    x4 = dct(x * -3)
+
+    print(x.sum())
+    print(x1)
+    print(x2)
+    print(x3)
+    print(x4)

@@ -92,8 +92,13 @@ class ResNet(nn.Module):
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.linear1 = nn.Linear(self.num_neighbors - 1, self.num_neighbors - 1)
-        self.linear2 = nn.Linear(self.num_neighbors - 1, 1)
+
+        self.linear1 = nn.Linear(self.num_neighbors - 1, 1)
+        self.linear2 = nn.Linear(64, 1)
+        # self.linear3 = nn.Linear(self.num_neighbors - 1, 1)
+        # self.linear4 = nn.Linear(self.num_neighbors - 1, 1)
+        # self.linear5 = nn.Linear(self.num_neighbors - 1, 1)
+
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2,
                                        dilate=replace_stride_with_dilation[0])
@@ -149,30 +154,31 @@ class ResNet(nn.Module):
 
     def _forward_impl(self, x):
         # See note [TorchScript super()]
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+        ######################
         nT, c, h, w = x.size()
         T = self.num_segments
         n = nT // T
 
         t = self.num_neighbors
 
-        x = x.view(n, T//t, t, c, h, w)
+        x = x.view(n, T // t, t, c, h, w)
         x_dct = dct(x.permute(0, 1, 3, 4, 5, 2)).permute(0, 1, 5, 2, 3, 4)
 
-        x_spat = x_dct[:, :, 0, :, :, :] / t / 2
-        x_spat = x_spat.view(nT//t, c, h, w)
+        x_spat = x.mean(dim=2)
+        x_spat = x_spat.view(nT // t, c, h, w)
 
         x_dct = x_dct[:, :, 1:, :, :, :]
-        x_dct = x_dct.view(nT//t, t-1, c, h, w).permute(0, 2, 3, 4, 1)
-        x_dct = self.relu(self.linear1(x_dct))
-        x_dct = self.linear2(x_dct).squeeze()
+        x_dct = x_dct.view(nT // t, t - 1, c, h, w).permute(0, 2, 3, 4, 1)
+        x_dct = self.relu(self.linear1(x_dct).squeeze())
+        x_dct = torch.sigmoid(self.linear2(x_dct.permute(0, 2, 3, 1)).squeeze())
+        x_dct = x_dct.unsqueeze(1)
 
-        x = x_spat + x_dct
-
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.maxpool(x)
-
+        x = x_spat * x_dct
+        ######################
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
