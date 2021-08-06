@@ -95,9 +95,12 @@ class ResNet(nn.Module):
 
         self.linear1 = nn.Linear(self.num_neighbors - 1, 1)
         self.linear2 = nn.Linear(64, 1)
-        # self.linear3 = nn.Linear(self.num_neighbors - 1, 1)
-        # self.linear4 = nn.Linear(self.num_neighbors - 1, 1)
-        # self.linear5 = nn.Linear(self.num_neighbors - 1, 1)
+        self.linear3 = nn.Linear(self.num_segments // self.num_neighbors - 1, 1)
+        self.linear4 = nn.Linear(256, 1)
+        self.linear5 = nn.Linear(self.num_segments // self.num_neighbors - 1, 1)
+        self.linear6 = nn.Linear(512, 1)
+        self.linear7 = nn.Linear(self.num_segments // self.num_neighbors - 1, 1)
+        self.linear8 = nn.Linear(1024, 1)
 
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2,
@@ -180,8 +183,56 @@ class ResNet(nn.Module):
         x = x_spat * x_dct
         ######################
         x = self.layer1(x)
+        ######################
+        nT, c, h, w = x.size()
+        T = self.num_segments // self.num_neighbors
+        n = nT // T
+
+        x = x.view(n, T, c, h, w)
+        x_dct = dct(x.permute(0, 2, 3, 4, 1)).permute(0, 4, 1, 2, 3)
+
+        x_dct = x_dct[:, 1:, :, :, :]
+        x_dct = self.relu(self.linear3(x_dct.permute(0, 2, 3, 4, 1)).squeeze())
+        x_dct = torch.sigmoid(self.linear4(x_dct.permute(0, 2, 3, 1)).squeeze())
+        x_dct = x_dct.unsqueeze(1).unsqueeze(1)
+
+        x = x * x_dct
+        x = x.view(nT, c, h, w)
+        ######################
         x = self.layer2(x)
+        ######################
+        nT, c, h, w = x.size()
+        T = self.num_segments // self.num_neighbors
+        n = nT // T
+
+        x = x.view(n, T, c, h, w)
+        x_dct = dct(x.permute(0, 2, 3, 4, 1)).permute(0, 4, 1, 2, 3)
+
+        x_dct = x_dct[:, 1:, :, :, :]
+        x_dct = self.relu(self.linear5(x_dct.permute(0, 2, 3, 4, 1)).squeeze())
+        x_dct = torch.sigmoid(self.linear6(x_dct.permute(0, 2, 3, 1)).squeeze())
+        x_dct = x_dct.unsqueeze(1).unsqueeze(1)
+
+        x = x * x_dct
+        x = x.view(nT, c, h, w)
+        ######################
         x = self.layer3(x)
+        ######################
+        nT, c, h, w = x.size()
+        T = self.num_segments // self.num_neighbors
+        n = nT // T
+
+        x = x.view(n, T, c, h, w)
+        x_dct = dct(x.permute(0, 2, 3, 4, 1)).permute(0, 4, 1, 2, 3)
+
+        x_dct = x_dct[:, 1:, :, :, :]
+        x_dct = self.relu(self.linear7(x_dct.permute(0, 2, 3, 4, 1)).squeeze())
+        x_dct = torch.sigmoid(self.linear8(x_dct.permute(0, 2, 3, 1)).squeeze())
+        x_dct = x_dct.unsqueeze(1).unsqueeze(1)
+
+        x = x * x_dct
+        x = x.view(nT, c, h, w)
+        ######################
         x = self.layer4(x)
 
         x = self.avgpool(x)
